@@ -1,0 +1,29 @@
+USEFUL PYTHON SCRIPTS - PURPOSE REFERENCE
+=========================================
+
+all_cipher_decoder.py          - Universal cipher decoder with AI filtering for various ciphers and encodings
+bacon_cypher_breaker.py        - Breaks Bacon's cipher (A/B encoding)  
+base_decoder.py                - Auto-detects and decodes Base16/32/58/64/85 encodings and variants
+brute_rot.py                   - Tries all ROT-N variants (ROT-1 through ROT-25) plus ROT-47 on text
+cypher_bruxor.py               - Simple XOR brute force tool for CTFlearn challenges
+decode_all.py                  - Universal CTF decoder: tries ROT-N, Base*, XOR, Atbash, hex, reverse, URL, etc.
+decompile_jar.py               - Decompiles JAR files' .class files into Java source code
+dns_exfil_reader.py            - Reassembles data exfiltrated via DNS query subdomains (hex, base32, base64url, etc.)
+entropy_scanner.py             - Finds encrypted/compressed regions by measuring byte entropy per block
+extract_all.py                 - Deep file extractor: tries every known method to find/extract hidden files
+file_carver.py                 - Extracts embedded files from binary blobs (ZIP, PNG, JPEG, ELF, PDF, GIF, BMP, WAV, MP3, 7z, RAR)
+freq_analysis.py               - Letter frequency analysis for substitution cipher cracking
+hash_identifier.py             - Identifies hash type by length, charset, and prefix patterns (MD5, SHA, bcrypt, etc.)
+jwt_none.py                    - Tests JWTs for alg:none vulnerability and forges arbitrary tokens
+lsb_extractor.py               - Extracts LSB-encoded data from PNG/BMP pixel values (various channels/bit planes)
+metadata_dumper.py             - Extracts EXIF, PDF metadata, ZIP comments, PNG chunks
+padding_oracle.py              - Automated CBC padding oracle attack (decrypts ciphertext via padding vulnerability)
+pcap_extractor.py              - Reconstructs TCP/UDP streams and extracts files from .pcap/.pcapng (HTTP, FTP, DNS, etc.)
+pyc_src_decompiler.py          - Decompiles Python .pyc files back to source code
+routebuster.py                 - Network routing discovery tool for CTF challenges
+strings_extractor.py           - Pulls printable strings + flag patterns from any binary file
+vigenere_breaker.py            - Vigenere cipher breaking utility
+vigenere_crack.py              - Cracks Vigenere cipher without knowing the key (Kasiski + Index of Coincidence)
+wav_lsb.py                     - Extracts LSB-encoded steganographic data from WAV audio samples
+wireshark_filter.py            - Converts natural language search terms to Wireshark display filters and tshark CLI
+xor_brute.py                   - Brute-force single/multi-byte XOR keys against a ciphertext file
