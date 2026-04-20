@@ -1,8 +1,21 @@
 #!/usr/bin/env bash
 # CTF Helper — Linux / macOS installer
+# Run directly:  bash install.sh
+# Or via curl:   curl -fsSL https://raw.githubusercontent.com/david-constantinescu/ctf-helper/main/install.sh | bash
 set -e
 
-REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+# If piped from curl, we have no $0 path — clone the repo first
+REPO_URL="https://github.com/david-constantinescu/ctf-helper.git"
+
+if [ -f "ctf_navigator.py" ]; then
+    REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
+else
+    echo "[*] Cloning ctf-helper repository..."
+    git clone --depth=1 "$REPO_URL" ctf-helper
+    cd ctf-helper
+    REPO_DIR="$(pwd)"
+fi
+
 SCRIPTS_DIR="$REPO_DIR/scripts"
 CONFIG_FILE="$HOME/.ctf_navigator.json"
 
@@ -39,8 +52,7 @@ if ! python3 -c "import tkinter" &>/dev/null 2>&1; then
         echo "[*] Installing python3-tk..."
         sudo apt install -y python3-tk
     elif [[ "$OSTYPE" == "darwin"* ]]; then
-        echo "    On macOS: brew install python-tk"
-        echo "    Or install Python from python.org (includes tkinter)"
+        echo "    On macOS: brew install python-tk  or install Python from python.org"
         exit 1
     else
         echo "    Install the python3-tk package for your distro."
@@ -49,18 +61,20 @@ if ! python3 -c "import tkinter" &>/dev/null 2>&1; then
 fi
 echo "[+] tkinter found"
 
-# ── Core script dependencies ───────────────────────────────────────────────────
+# ── Python dependencies ────────────────────────────────────────────────────────
 echo ""
-echo "[*] Installing core Python dependencies..."
+echo "[*] Installing Python dependencies..."
 python3 -m pip install --quiet --upgrade \
     pyinstaller \
+    tkinterdnd2 \
     Pillow \
     pycryptodome \
     scapy
 
-# ── Optional but useful ────────────────────────────────────────────────────────
-echo "[*] Installing optional dependencies (gmpy2 for RSA, pyshark)..."
+echo "[*] Installing optional dependencies..."
 python3 -m pip install --quiet gmpy2 pyshark 2>/dev/null || true
+
+echo "[+] Dependencies installed"
 
 # ── Write config ──────────────────────────────────────────────────────────────
 echo ""
@@ -99,4 +113,7 @@ fi
 echo ""
 echo "  Scripts live in:    $SCRIPTS_DIR"
 echo "  Config file:        $CONFIG_FILE"
+echo ""
+echo "  Drag & drop files onto the window to add artifacts."
+echo "  Double-click an artifact to add cues (e.g. 'http', 'dns', 'pwn')."
 echo "================================================"

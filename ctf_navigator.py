@@ -11,11 +11,19 @@ import os
 import sys
 import subprocess
 import platform
+import shlex
+import re
 from pathlib import Path
 from datetime import datetime
 from copy import deepcopy
 
-_TkBase = tk.Tk
+try:
+    from tkinterdnd2 import TkinterDnD, DND_FILES
+    _TkBase = TkinterDnD.Tk
+    HAS_DND = True
+except ImportError:
+    _TkBase = tk.Tk
+    HAS_DND = False
 
 # ─── Theme ────────────────────────────────────────────────────────────────────
 BG_ROOT   = "#f4f6fb"
@@ -1918,6 +1926,223 @@ NODES = {
         "artifacts": ["sqlite"],
     },
 
+    # ══════════ PWN / OVERFLOW ════════════════════════════════════════════════════
+
+    "pwn_checksec": {
+        "title": "Check Binary Protections (checksec)",
+        "category": "re",
+        "description":
+            "Identify which mitigations are enabled: NX, Stack Canary, PIE/ASLR, RELRO, FORTIFY. "
+            "Each disabled protection opens a different attack path.",
+        "tool": "checksec.py",
+        "command": 'python3 "{S}/checksec.py" <binary>',
+        "tips": [
+            "No NX + no canary + no PIE → classic ret2shellcode",
+            "No canary + no PIE → ret2plt/ret2libc with fixed gadget addresses",
+            "Canary present → need to leak it first (format string or partial overwrite)",
+            "Full RELRO → GOT is read-only, can't overwrite function pointers in GOT",
+            "Partial RELRO → GOT writable after lazy binding — GOT overwrite possible",
+            "No PIE + Partial RELRO → ret2PLT stub without any leaks",
+        ],
+        "on_hit": ["pwn_rop", "pwn_overflow", "elf_ghidra"],
+        "on_miss": ["elf_strings", "elf_ghidra"],
+        "artifacts": ["elf"],
+    },
+
+    "pwn_overflow": {
+        "title": "Stack Buffer Overflow — Find Offset & Exploit",
+        "category": "re",
+        "description":
+            "Find the exact offset to the saved return address, then build a payload "
+            "to redirect execution. Uses cyclic patterns to pinpoint the crash offset.",
+        "tool": "pwntools_template.py",
+        "command":
+            '# Step 1: generate cyclic pattern and find offset\n'
+            'python3 -c "from pwn import *; print(cyclic(200).decode())" | ./<binary>\n'
+            '# In GDB: run, crash, then: cyclic_find(0x6161616e)  ← value of $rsp\n'
+            '# Step 2: generate exploit template\n'
+            'python3 "{S}/pwntools_template.py" <binary> --type stack -o exploit.py',
+        "tips": [
+            "gdb-peda: pattern create 200 → run → pattern offset $rsp",
+            "pwndbg: cyclic 200 → run → cyclic -l $rsp",
+            "Unsafe functions: gets(), scanf('%s'), strcpy(), strcat(), read() with wrong size",
+            "Off-by-one: sometimes only 1 byte overflow — check for NULL overwrite of canary LSB",
+            "32-bit: overwrite EIP directly; 64-bit: overwrite RSP-pointed return address",
+        ],
+        "on_hit": ["pwn_rop", "pwn_shellcode", "pwn_ret2libc"],
+        "on_miss": ["pwn_format", "pwn_heap", "elf_ghidra"],
+        "artifacts": ["elf"],
+    },
+
+    "pwn_rop": {
+        "title": "ROP Chain — Find Gadgets & Build Chain",
+        "category": "re",
+        "description":
+            "Find Return-Oriented Programming gadgets and assemble a chain to call "
+            "execve('/bin/sh') or system('/bin/sh') without injecting shellcode.",
+        "tool": "rop_finder.py",
+        "command": 'python3 "{S}/rop_finder.py" <binary> {ARGS}',
+        "args": [
+            {"flag": "--chain ret2libc", "label": "ret2libc template", "default": True},
+            {"flag": "--chain execve",   "label": "execve syscall",    "default": False},
+            {"flag": "--all",            "label": "Show all gadgets",   "default": False},
+        ],
+        "tips": [
+            "Install ROPgadget: pip3 install ROPgadget",
+            "Key gadgets: pop rdi; ret (first arg), pop rsi; ret (second arg)",
+            "ret gadget alone: used for 16-byte stack alignment on Ubuntu",
+            "No pop rdx? Try: pop rdx; pop rbx; ret or mov edx, eax; ret",
+            "one_gadget: finds a single gadget that spawns shell (needs libc)",
+            "Ghidra: disassemble gadgets at found addresses to verify",
+        ],
+        "on_hit": ["pwn_ret2libc", "txt_decode"],
+        "on_miss": ["pwn_shellcode", "elf_ghidra"],
+        "artifacts": ["elf"],
+    },
+
+    "pwn_ret2libc": {
+        "title": "ret2libc — Leak & Call system('/bin/sh')",
+        "category": "re",
+        "description":
+            "Leak a libc address via a GOT/PLT pointer, calculate libc base, "
+            "then call system('/bin/sh') or execve in a second payload.",
+        "tool": "pwntools_template.py",
+        "command": 'python3 "{S}/pwntools_template.py" <binary> --type ret2libc -o exploit.py',
+        "tips": [
+            "Leak puts@GOT via puts@PLT, then puts.address - puts_offset = libc_base",
+            "Find libc version: https://libc.blukat.me  or libc-database",
+            "one_gadget libc.so.6  — finds magic gadgets that call execve directly",
+            "Ubuntu 22.04 needs ret gadget for 16-byte alignment before system()",
+            "pwntools: libc.sym['system'] after setting libc.address = leak - libc.sym['puts']",
+        ],
+        "on_hit": ["txt_decode"],
+        "on_miss": ["pwn_rop", "elf_ghidra"],
+        "artifacts": ["elf"],
+    },
+
+    "pwn_shellcode": {
+        "title": "Shellcode Injection (NX Disabled)",
+        "category": "re",
+        "description":
+            "Inject shellcode into the buffer and redirect execution to it. "
+            "Only works when NX is disabled. Find a jmp esp / call eax gadget.",
+        "tool": "pwntools / ROPgadget",
+        "command":
+            '# Generate shellcode\n'
+            'python3 -c "from pwn import *; context.arch=\'amd64\'; print(asm(shellcraft.sh()).hex())"\n'
+            '# Find jmp rsp gadget:\n'
+            'ROPgadget --binary <binary> | grep "jmp rsp"\n'
+            'python3 "{S}/pwntools_template.py" <binary> --type shellcode -o exploit.py',
+        "tips": [
+            "Check NX first: python3 checksec.py <binary>",
+            "shellcraft.sh() generates a shell-spawning shellcode for the target arch",
+            "Bad bytes (null, newline) may truncate input — use encoder or avoid them",
+            "If ASLR but no PIE: buf address is randomised — need a leak or nop sled",
+            "execve syscall: rax=59, rdi=&'/bin/sh', rsi=0, rdx=0, syscall",
+        ],
+        "on_hit": ["txt_decode"],
+        "on_miss": ["pwn_rop", "pwn_ret2libc"],
+        "artifacts": ["elf"],
+    },
+
+    "pwn_format": {
+        "title": "Format String Vulnerability",
+        "category": "re",
+        "description":
+            "Exploit printf/fprintf with user-controlled format string to read arbitrary "
+            "memory (leak canary/libc) or write to any address via %n.",
+        "tool": "pwntools_template.py",
+        "command":
+            '# Find offset: send AAAA.%p.%p.%p.%p... until 0x41414141 appears\n'
+            'python3 -c "print(\'AAAA.\' + \'.\'.join([\'%\'+str(i)+\'$p\' for i in range(1,20)]))" | ./<binary>\n'
+            'python3 "{S}/pwntools_template.py" <binary> --type format -o exploit.py',
+        "tips": [
+            "%p leaks pointer values from stack — find your input position",
+            "%s dereferences a pointer as a string — useful for reading GOT entries",
+            "%n writes number of bytes printed so far to a pointer — arbitrary write",
+            "fmtstr_payload(offset, {target: value}) — pwntools generates write payload",
+            "Ghidra: find format string calls where argument is user-controlled",
+            "Check: printf(buf) vs printf('%s', buf) — the former is vulnerable",
+        ],
+        "on_hit": ["pwn_ret2libc", "pwn_rop"],
+        "on_miss": ["pwn_overflow", "pwn_heap"],
+        "artifacts": ["elf"],
+    },
+
+    "pwn_heap": {
+        "title": "Heap Exploitation",
+        "category": "re",
+        "description":
+            "Exploit heap allocator bugs: use-after-free, double-free, heap overflow, "
+            "tcache poisoning. Target __malloc_hook or GOT entries for code execution.",
+        "tool": "pwntools_template.py / GDB with pwndbg",
+        "command":
+            'python3 "{S}/pwntools_template.py" <binary> --type heap -o exploit.py\n'
+            '# In GDB (pwndbg): heap, bins, vis_heap_chunks, malloc_chunk addr',
+        "tips": [
+            "pwndbg: heap → shows all chunks. bins → shows tcache/fastbin/unsorted bins",
+            "Double-free: allocate same chunk twice → corrupt fd pointer → write anywhere",
+            "tcache (libc ≥ 2.26): 7 chunks per size class, limited checks, easy double-free",
+            "House of Force: overflow into top chunk size → next alloc anywhere",
+            "Ghidra: find alloc/free wrappers → trace calls → spot size/index issues",
+            "Common targets: __malloc_hook, __free_hook (libc < 2.34), GOT entries",
+        ],
+        "on_hit": ["pwn_ret2libc"],
+        "on_miss": ["pwn_format", "elf_ghidra"],
+        "artifacts": ["elf"],
+    },
+
+    "pwn_ghidra": {
+        "title": "Reverse Engineer in Ghidra",
+        "category": "re",
+        "description":
+            "Open binary in Ghidra for decompilation. Find the vulnerable function, "
+            "measure buffer sizes, identify dangerous calls, and locate win functions.",
+        "tool": "Ghidra (external)",
+        "command":
+            '# Install: https://ghidra-sre.org\n'
+            '# Headless analysis:\n'
+            '$GHIDRA_HOME/support/analyzeHeadless /tmp/ghidra_proj MyProject \\\n'
+            '    -import <binary> -postScript PrintFunctions.java\n'
+            '# GUI: ghidra & → import → auto-analyse → Window → Decompiler',
+        "tips": [
+            "Functions window (Shift+F3): search for 'gets', 'strcpy', 'scanf', 'read'",
+            "Decompiler shows C-like code — look for char buf[N] and dangerous calls",
+            "Edit → Symbol Table: find win/flag functions and their addresses",
+            "Stack frame view shows buffer sizes relative to return address",
+            "Cross-references (X): find all callers of a vulnerable function",
+            "Script Manager → GhidraScript → Python scripting for automation",
+            "pwntools: elf.sym['func_name'] gives address after Ghidra analysis",
+        ],
+        "on_hit": ["pwn_overflow", "pwn_rop", "pwn_format"],
+        "on_miss": ["elf_strings", "elf_sections"],
+        "artifacts": ["elf"],
+    },
+
+    "pwn_patch": {
+        "title": "Binary Patch Analysis (Diff Two Binaries)",
+        "category": "re",
+        "description":
+            "Compare original and patched binaries to find what changed — "
+            "NOP'd checks, flipped jump conditions, removed canaries, or added backdoors.",
+        "tool": "binary_diff.py",
+        "command": 'python3 "{S}/binary_diff.py" <original_binary> <patched_binary> {ARGS}',
+        "args": [
+            {"flag": "--asm",    "label": "Disassemble diffs", "default": True},
+            {"flag": "--max 20", "label": "Limit to 20 diffs",  "default": True},
+        ],
+        "tips": [
+            "Common CTF patch: je → jne (0x74 → 0x75) to bypass a check",
+            "NOP sled (0x90 * N) replacing a call/jump → function/check was removed",
+            "Changed constant in comparison (e.g. cmp eax, 0x539 → cmp eax, 0x1)",
+            "Also try: vbindiff binary1 binary2  (interactive hex diff)",
+            "radiff2 -D binary1 binary2  (radare2 diff with disassembly)",
+        ],
+        "on_hit": ["pwn_overflow", "pwn_ghidra"],
+        "on_miss": ["elf_ghidra"],
+        "artifacts": ["elf", "exe"],
+    },
+
     # ══════════ DEOBFUSCATORS ════════════════════════════════════════════════════
 
     "ps_deobfuscate": {
@@ -2116,7 +2341,7 @@ INITIAL_NODES = {
     "image":   ["img_meta", "img_strings", "img_entropy", "img_lsb", "img_carve"],
     "audio":   ["aud_meta", "aud_lsb", "aud_spectrum"],
     "zip":     ["zip_inspect"],
-    "elf":     ["elf_strings", "elf_entropy", "rust_analyse"],
+    "elf":     ["elf_strings", "elf_entropy", "pwn_checksec", "rust_analyse"],
     "exe":     ["exe_strings", "exe_entropy"],
     "pdf":     ["pdf_meta", "pdf_strings"],
     "text":    ["txt_decode", "txt_base", "txt_rot", "layer_decode", "number_decode"],
@@ -2193,13 +2418,12 @@ class Engine:
                 selected_args = [a["flag"] for a in node.get("args", [])
                                   if a.get("default", True)]
             cmd = cmd.replace("{ARGS}", " ".join(selected_args)).strip()
-        # Replace file-like placeholders with the path of the first artifact
+        # Replace file-like placeholders with the shell-quoted path of the first artifact
         if self.artifacts:
-            first_artifact_path = self.artifacts[0]["path"]
-            import re
-            # Pattern to match placeholders like <file.pcap>, <archive.zip>, <image>, etc.
+            raw_path = self.artifacts[0]["path"]
+            quoted_path = shlex.quote(raw_path)
             pattern = re.compile(r'<[^>]+>')
-            cmd = pattern.sub(first_artifact_path, cmd)
+            cmd = pattern.sub(quoted_path, cmd)
         return cmd
 
     def export(self):
@@ -2378,15 +2602,15 @@ class SuggestionCard(tk.Frame):
             tk.Button(btn_row, text="✓  Found something!", font=FONT_BOLD,
                       bg=SUCCESS, fg="white", relief="flat",
                       padx=12, pady=5, cursor="hand2",
-                      command=lambda: self._result("hit")).pack(side="left", padx=(0, 8))
+                      command=lambda: self._result("hit")).pack(side="left", padx=(0, 6))
+            tk.Button(btn_row, text="▶  Run", font=FONT_BOLD,
+                      bg=ACCENT, fg="white", relief="flat",
+                      padx=12, pady=5, cursor="hand2",
+                      command=self._run_first_line).pack(side="left", padx=(0, 6))
             tk.Button(btn_row, text="✗  Nothing here", font=FONT_MAIN,
-                      bg="#9e9e9e", fg="white", relief="flat",
+                      bg=FAIL_C, fg="white", relief="flat",
                       padx=12, pady=5, cursor="hand2",
                       command=lambda: self._result("miss")).pack(side="left")
-            tk.Button(btn_row, text="▶ Run", font=FONT_SMALL,
-                      bg="#2a2a4a", fg="white", relief="flat",
-                      padx=8, pady=5, cursor="hand2",
-                      command=self._run_first_line).pack(side="right")
 
         # Notes area (always visible)
         notes_outer = tk.Frame(self.body, bg=bg_card)
@@ -2768,6 +2992,7 @@ class CTFNavigator(_TkBase):
         self._filter_btns = {}
         self._build()
         self._refresh()
+        self._setup_dnd()
 
     # ── Layout ────────────────────────────────────────────────────────────────
 
@@ -2882,11 +3107,63 @@ class CTFNavigator(_TkBase):
 
     # ── Actions ───────────────────────────────────────────────────────────────
 
-    def _add_artifact(self):
-        path = filedialog.askopenfilename(title="Select artifact file")
-        if not path:
+    # ── Drag-and-drop ─────────────────────────────────────────────────────────
+
+    def _setup_dnd(self):
+        if not HAS_DND:
             return
+        # Register every widget that exists now and any created later
+        self._register_dnd_target(self)
+
+    def _register_dnd_target(self, widget):
+        """Recursively bind DnD drop event to widget and all its children."""
+        try:
+            widget.drop_target_register(DND_FILES)
+            widget.dnd_bind("<<Drop>>", self._on_drop)
+        except Exception:
+            pass
+        for child in widget.winfo_children():
+            self._register_dnd_target(child)
+
+    def _on_drop(self, event):
+        paths = self._parse_drop_paths(event.data)
+        for path in paths:
+            self._add_file_as_artifact(path)
+
+    @staticmethod
+    def _parse_drop_paths(data):
+        """Parse the drop event data into a list of file paths.
+        tkinterdnd2 returns paths wrapped in braces if they contain spaces:
+          {/path/with spaces/file.txt} /simple/path.txt
+        """
+        paths = []
+        remaining = data.strip()
+        while remaining:
+            if remaining.startswith('{'):
+                end = remaining.find('}')
+                if end == -1:
+                    break
+                paths.append(remaining[1:end])
+                remaining = remaining[end+1:].strip()
+            else:
+                parts = remaining.split(None, 1)
+                paths.append(parts[0])
+                remaining = parts[1].strip() if len(parts) > 1 else ''
+        # Strip file:// URI prefix if present
+        clean = []
+        for p in paths:
+            if p.startswith('file://'):
+                p = p[7:]
+            clean.append(p)
+        return clean
+
+    # ── Add artifact ──────────────────────────────────────────────────────────
+
+    def _add_file_as_artifact(self, path):
+        """Detect type and add a file path as an artifact (used by browse + DnD)."""
         p = Path(path)
+        if not p.exists():
+            return
         ext = p.suffix.lower()
         atype = AddArtifactDialog._EXT_MAP.get(ext)
         if not atype:
@@ -2909,6 +3186,15 @@ class CTFNavigator(_TkBase):
         subtype = subs[0] if subs else "—"
         self.engine.add_artifact(atype, subtype, p.name, str(path), "")
         self._refresh()
+        # Re-register DnD on any newly created widgets
+        if HAS_DND:
+            self._register_dnd_target(self)
+
+    def _add_artifact(self):
+        path = filedialog.askopenfilename(title="Select artifact file")
+        if not path:
+            return
+        self._add_file_as_artifact(path)
 
     def _edit_artifact_details(self, index):
         arts = self.engine.artifacts
@@ -2925,12 +3211,56 @@ class CTFNavigator(_TkBase):
         dlg = AddArtifactDialog(self, prefill)
         if dlg.result:
             r = dlg.result
+            old_cues = set(a.get("cues", []))
+            new_cues = set(r["cues"])
             arts[index]["type"]    = r["type"]
             arts[index]["subtype"] = r["subtype"]
             arts[index]["name"]    = r["name"]
             arts[index]["notes"]   = r["notes"]
             arts[index]["cues"]    = r["cues"]
+            # Activate any cue-triggered nodes for new cues
+            if new_cues - old_cues:
+                self._activate_cue_nodes(r["type"], r["cues"])
             self._refresh()
+
+    def _activate_cue_nodes(self, atype, cues):
+        """Add extra initial nodes based on artifact cues."""
+        cue_nodes = {
+            "http":    ["pcap_http", "web_source", "web_cookies"],
+            "dns":     ["pcap_dns"],
+            "ftp":     ["pcap_ftp"],
+            "tls":     ["pcap_tls"],
+            "ssl":     ["pcap_tls"],
+            "smtp":    ["pcap_smtp"],
+            "icmp":    ["pcap_icmp"],
+            "covert":  ["pcap_covert"],
+            "rsa":     ["cert_rsa_attack", "py_crypto_check"],
+            "xor":     ["xor_brute_file", "txt_xor"],
+            "base64":  ["txt_base", "layer_decode"],
+            "jwt":     ["web_jwt"],
+            "sql":     ["sql_search_flags", "sql_schema"],
+            "stego":   ["img_lsb", "img_entropy", "aud_lsb"],
+            "lsb":     ["img_lsb", "aud_lsb"],
+            "zip":     ["zip_inspect"],
+            "upx":     ["elf_unpack"],
+            "packed":  ["elf_unpack", "exe_unpack"],
+            "obfusc":  ["py_deobfuscate", "js_deobfuscate", "php_deobfuscate"],
+            "crypto":  ["py_crypto_check", "cert_inspect", "hash_id"],
+            "pwn":     ["elf_ghidra", "elf_sections", "elf_debug"],
+            "heap":    ["elf_ghidra", "elf_debug"],
+            "rop":     ["elf_ghidra", "elf_sections"],
+            "rust":    ["rust_analyse"],
+            "node":    ["node_audit", "node_env_inspect"],
+            "php":     ["php_deobfuscate"],
+        }
+        for cue in cues:
+            cue_lower = cue.strip().lower()
+            for key, nodes in cue_nodes.items():
+                if key in cue_lower:
+                    for nid in nodes:
+                        if nid in NODES and nid not in self.engine.status:
+                            self.engine.active.append(nid)
+                            self.engine.status[nid] = "pending"
 
     def _open_settings(self):
         SettingsDialog(self, self.engine)
@@ -2999,8 +3329,11 @@ class CTFNavigator(_TkBase):
                       relief="flat", cursor="hand2",
                       command=lambda idx=i: self._remove_artifact(idx)).pack(side="right", padx=4)
         if not self.engine.artifacts:
-            tk.Label(self.art_frame, text="No artifacts added.",
+            hint = "Drop files anywhere  •  or click + Add" if HAS_DND else "Click + Add to add an artifact"
+            tk.Label(self.art_frame, text=hint,
                      font=FONT_SMALL, bg=BG_ROOT, fg=FG_SEC).pack(pady=4)
+            tk.Label(self.art_frame, text="Double-click artifact to add cues",
+                     font=FONT_SMALL, bg=BG_ROOT, fg=FG_SEC).pack()
 
     def _remove_artifact(self, idx):
         self.engine.remove_artifact(idx)
