@@ -3297,6 +3297,8 @@ class CTFNavigator(_TkBase):
         self._refresh_artifacts()
         self._refresh_suggestions()
         self._refresh_path()
+        if HAS_DND:
+            self.after(0, lambda: self._register_dnd_target(self))
 
     def _refresh_artifacts(self):
         for w in self.art_frame.winfo_children():
