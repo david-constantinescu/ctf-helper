@@ -2699,10 +2699,13 @@ class SuggestionCard(tk.Frame):
         """Show command output in a dialog with interesting/not interesting buttons"""
         dialog = tk.Toplevel(self)
         dialog.title("Command Output")
-        dialog.geometry("600x400")
         dialog.configure(bg=BG_ROOT)
         dialog.transient(self.winfo_toplevel())
         dialog.grab_set()
+        # Fill the screen (not maximized — just sized to screen dimensions)
+        sw = dialog.winfo_screenwidth()
+        sh = dialog.winfo_screenheight()
+        dialog.geometry(f"{sw}x{sh}+0+0")
         
         # Output text area
         text_frame = tk.Frame(dialog, bg=BG_ROOT)
@@ -3303,10 +3306,13 @@ class CTFNavigator(_TkBase):
                            highlightbackground=BORDER, highlightthickness=1)
             row.pack(fill="x", pady=2)
             
-            # Make row double-clickable to edit details
-            row.bind("<Double-Button-1>", lambda e, idx=i: self._edit_artifact_details(idx))
             row.configure(cursor="hand2")
-            
+
+            def _bind_dblclick(widget, idx=i):
+                widget.bind("<Double-Button-1>", lambda e, ix=idx: self._edit_artifact_details(ix))
+                for child in widget.winfo_children():
+                    _bind_dblclick(child, idx=ix)
+
             icon = {"pcap":"📡","image":"🖼","audio":"🎵","zip":"📦",
                     "elf":"⚙","exe":"💻","pdf":"📄","text":"🔤",
                     "web":"🌐","docker":"🐳","memory":"🧠","unknown":"❓",
@@ -3317,13 +3323,16 @@ class CTFNavigator(_TkBase):
                      bg=BG_PANEL, fg=FG_MAIN).pack(side="left", padx=8, pady=4)
             tk.Label(row, text=a["subtype"], font=FONT_SMALL,
                      bg=BG_PANEL, fg=FG_SEC).pack(side="left")
-            
+
             # Show cues if any
             cues = a.get("cues", [])
             if cues:
                 cues_text = f"[{', '.join(cues)}]"
                 tk.Label(row, text=cues_text, font=FONT_SMALL,
                          bg=BG_PANEL, fg="#ff9800").pack(side="left", padx=(8, 0))
+
+            # Bind double-click on row and all children after all labels are packed
+            row.after(0, lambda w=row, ix=i: _bind_dblclick(w, ix))
                      
             tk.Button(row, text="✕", font=FONT_SMALL, bg=BG_PANEL, fg=FAIL_C,
                       relief="flat", cursor="hand2",

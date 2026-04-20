@@ -23,6 +23,8 @@ FLAG_PATTERNS = [
 
 COMPILED_FLAGS = [re.compile(p, re.IGNORECASE) for p in FLAG_PATTERNS]
 
+KEYWORD_PATTERN = re.compile(r'\b(ctf|flag|osc|rocsc)\b', re.IGNORECASE)
+
 def extract_strings(data: bytes, min_len: int, encoding: str) -> list[tuple[int, str]]:
     results = []
     if encoding == 'ascii':
@@ -79,6 +81,7 @@ def main():
     all_strings.sort(key=lambda x: x[0])
 
     flags_found = []
+    keyword_hits: list[tuple[str, str]] = []  # (keyword, string containing it)
     out_lines = []
 
     for offset, s, enc in all_strings:
@@ -87,13 +90,17 @@ def main():
             for hit in hits:
                 flags_found.append(hit)
 
+        kw_matches = KEYWORD_PATTERN.findall(s)
+        for kw in kw_matches:
+            keyword_hits.append((kw.lower(), s.strip()))
+
         if args.flags_only and not has_flag:
             continue
 
         prefix = f"0x{offset:08x}  [{enc:7s}]  " if args.offset else ""
         line = prefix + s
         out_lines.append(line)
-        marker = "  <== FLAG!" if has_flag else ""
+        marker = "  <== FLAG!" if has_flag else ("  <== keyword" if kw_matches else "")
         print(line + marker)
 
     if flags_found:
@@ -104,6 +111,22 @@ def main():
         print("=" * 60)
     else:
         print("\n[*] No flag patterns matched.")
+
+    if keyword_hits:
+        print("\n" + "-" * 60)
+        kw_counts = {}
+        for kw, _ in keyword_hits:
+            kw_counts[kw] = kw_counts.get(kw, 0) + 1
+        summary = ", ".join(f"{kw!r}×{n}" for kw, n in sorted(kw_counts.items()))
+        print(f"[!] Keyword hits found: {summary}")
+        seen = set()
+        for kw, s in keyword_hits:
+            if s not in seen:
+                seen.add(s)
+                print(f"    [{kw}] {s[:120]}")
+        print("-" * 60)
+    else:
+        print("[*] No CTF/flag/osc/rocsc keywords found in strings.")
 
     print(f"\n[*] Total strings found: {len(all_strings)}")
 
