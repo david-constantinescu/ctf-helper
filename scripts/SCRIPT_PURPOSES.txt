@@ -2,6 +2,16 @@ USEFUL PYTHON SCRIPTS - PURPOSE REFERENCE
 =========================================
 
 all_cipher_decoder.py          - Universal cipher decoder with AI filtering for various ciphers and encodings
+cert_inspector.py              - Parse PEM/DER certificates and keys; extract RSA/EC params, detect weak key sizes
+js_deobfuscate.py              - JS deobfuscation: eval/atob/fromCharCode unwrapping, base64 decode, beautify
+layer_decoder.py               - Recursive multi-layer decoder: base64/32/58, hex, gzip, ROT13/47, URL, binary, etc.
+node_secrets_audit.py          - Scan Node.js/JS projects for secrets, API keys, JWTs, dangerous eval, supply chain risks
+number_decoder.py              - Decode numeric/symbolic arrays: ASCII decimal, binary, octal, Morse, NATO, Braille, A1Z26
+php_deobfuscate.py             - PHP deobfuscation: base64_decode/str_rot13/gzinflate chains, chr() arrays, eval nesting
+ps_deobfuscate.py              - PowerShell deobfuscation: -EncodedCommand, [char] arrays, IEX chains, XOR, gzip payloads
+rsa_attack.py                  - RSA attacks: Fermat factorisation, Wiener's theorem, small-e root, common factor GCD
+rust_demangler.py              - Rust binary analysis: symbol demangling, panic messages, source paths, interesting funcs
+sql_inspector.py               - Dump SQLite schema/tables, search for flags, extract BLOB columns as files
 bacon_cypher_breaker.py        - Breaks Bacon's cipher (A/B encoding)  
 base_decoder.py                - Auto-detects and decodes Base16/32/58/64/85 encodings and variants
 brute_rot.py                   - Tries all ROT-N variants (ROT-1 through ROT-25) plus ROT-47 on text

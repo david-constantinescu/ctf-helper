@@ -15,13 +15,7 @@ from pathlib import Path
 from datetime import datetime
 from copy import deepcopy
 
-try:
-    from tkinterdnd2 import TkinterDnD, DND_FILES
-    HAS_DND = True
-except ImportError:
-    HAS_DND = False
-
-_TkBase = (TkinterDnD.Tk if HAS_DND else tk.Tk)
+_TkBase = tk.Tk
 
 # ─── Theme ────────────────────────────────────────────────────────────────────
 BG_ROOT   = "#f4f6fb"
@@ -76,6 +70,14 @@ ARTIFACT_TYPES = {
     "docker":  "Docker Image / Container",
     "memory":  "Memory Dump (.dmp / .raw / .vmem)",
     "unknown": "Unknown / Other Binary",
+    "python":     "Python / SageMath Script (.py / .sage)",
+    "javascript": "JavaScript / TypeScript (.js / .ts / .jsx / .tsx)",
+    "java":       "Java / JVM (.jar / .class / .java)",
+    "shell":      "Shell / Batch Script (.sh / .ps1 / .bat)",
+    "cert":       "Certificate / Key (.pem / .crt / .key / .p12)",
+    "sqlite":     "SQLite Database (.db / .sqlite)",
+    "php":        "PHP Script (.php / .php7 / .phtml)",
+    "rust":       "Rust Source (.rs / Cargo.toml)",
 }
 
 ARTIFACT_SUBTYPES = {
@@ -91,6 +93,14 @@ ARTIFACT_SUBTYPES = {
     "docker": ["image file (.tar)", "running container", "docker-compose"],
     "memory": ["Windows dump", "Linux dump", "unknown OS"],
     "unknown":["binary", "mixed text+binary", "all printable"],
+    "python":     ["plain Python", "SageMath (.sage)", "CTF solve script", "exploit/pwn"],
+    "javascript": ["plain JS", "TypeScript", "Node.js script", "obfuscated/minified", "browser exploit"],
+    "java":       ["JAR file", "class file", "source (.java)", "Android APK", "obfuscated"],
+    "shell":      ["Bash/sh", "PowerShell", "Batch (.bat/.cmd)", "zsh/fish", "unknown shell"],
+    "cert":       ["PEM certificate", "DER certificate", "RSA private key", "EC private key", "PKCS#12/PFX", "public key only"],
+    "sqlite":     ["standard SQLite3", "WAL mode", "encrypted (SQLCipher)", "partial/corrupt"],
+    "php":        ["plain PHP", "obfuscated", "web shell", "framework (Laravel/Symfony)", "with eval chains"],
+    "rust":       ["Rust source (.rs)", "compiled ELF", "Cargo project", "WASM output"],
 }
 
 # ─── Suggestion node tree ─────────────────────────────────────────────────────
@@ -118,8 +128,8 @@ NODES = {
             "DNS queries saved to dns_queries.txt",
             "Use Wireshark → Follow TCP/UDP Stream for visual inspection",
         ],
-        "on_hit": ["pcap_http", "pcap_dns", "pcap_streams_analyze"],
-        "on_miss": ["pcap_strings", "pcap_wireshark_filters"],
+        "on_hit": ["pcap_http", "pcap_dns", "pcap_streams_analyze", "pcap_ftp", "pcap_smtp", "pcap_stats"],
+        "on_miss": ["pcap_tls", "pcap_covert", "pcap_icmp", "pcap_udp", "pcap_tcp_flags", "pcap_strings", "pcap_wireshark_filters"],
         "artifacts": ["pcap"],
     },
 
@@ -138,8 +148,8 @@ NODES = {
             "Search for flag{} or ctf{ patterns in .html files",
             "In Wireshark: File → Export Objects → HTTP",
         ],
-        "on_hit": ["web_jwt", "pcap_creds_found"],
-        "on_miss": ["pcap_dns"],
+        "on_hit": ["web_jwt", "pcap_creds_found", "web_cookies", "file_carve", "txt_decode"],
+        "on_miss": ["pcap_dns", "pcap_stats", "pcap_tls"],
         "artifacts": ["pcap"],
     },
 
@@ -163,8 +173,8 @@ NODES = {
             "Try --encoding hex / base32 / base64url if auto fails",
             "In Wireshark: filter 'dns.qry.name' and sort by name",
         ],
-        "on_hit": ["txt_decode"],
-        "on_miss": ["pcap_strings"],
+        "on_hit": ["txt_decode", "txt_base", "txt_rot"],
+        "on_miss": ["pcap_strings", "pcap_icmp", "pcap_udp", "pcap_stats"],
         "artifacts": ["pcap"],
     },
 
@@ -182,8 +192,8 @@ NODES = {
             "High entropy stream → possibly encrypted → try xor_brute",
             "IRC: flag might be in channel topic or private message",
         ],
-        "on_hit": ["xor_brute_file", "file_carve"],
-        "on_miss": ["pcap_strings"],
+        "on_hit": ["xor_brute_file", "file_carve", "txt_decode", "pcap_ftp", "pcap_smtp", "img_carve", "zip_inspect"],
+        "on_miss": ["pcap_strings", "pcap_covert", "pcap_tcp_flags"],
         "artifacts": ["pcap"],
     },
 
@@ -200,8 +210,8 @@ NODES = {
             "Also try grep -a 'CTF{\\|FLAG{\\|OSC{' <file.pcap>",
             "Check for email addresses, URLs, usernames that hint at the flag",
         ],
-        "on_hit": ["txt_decode"],
-        "on_miss": [],
+        "on_hit": ["txt_decode", "txt_base", "txt_rot", "web_recon", "pcap_stats"],
+        "on_miss": ["file_carve", "pcap_wireshark_filters", "pcap_covert"],
         "artifacts": ["pcap"],
     },
 
@@ -259,8 +269,8 @@ NODES = {
             "capinfos → file-level: capture duration, packet count, link type",
             "Wireshark → Statistics → Protocol Hierarchy (GUI equivalent)",
         ],
-        "on_hit": ["pcap_extract", "pcap_tls", "pcap_dns"],
-        "on_miss": ["pcap_strings"],
+        "on_hit": ["pcap_extract", "pcap_tls", "pcap_dns", "pcap_http", "pcap_arp", "pcap_icmp", "pcap_udp", "pcap_tcp_flags", "pcap_ftp", "pcap_smtp"],
+        "on_miss": ["pcap_strings", "pcap_covert", "pcap_wireshark_filters"],
         "artifacts": ["pcap"],
     },
 
@@ -285,8 +295,8 @@ NODES = {
             "Check certificate: tshark -r <pcap> -Y 'tls.handshake.certificate' -V",
             "Self-signed cert → export and analyze with: openssl x509 -text -noout -in cert.pem",
         ],
-        "on_hit": ["pcap_http", "pcap_creds_found"],
-        "on_miss": ["pcap_dns"],
+        "on_hit": ["pcap_http", "pcap_creds_found", "web_jwt", "txt_decode", "file_carve"],
+        "on_miss": ["pcap_dns", "pcap_stats", "pcap_arp", "hash_id"],
         "artifacts": ["pcap"],
     },
 
@@ -305,8 +315,8 @@ NODES = {
             "icmpsh C2: requests = shell commands, replies = command output",
             "ptunnel: reassemble all ICMP payloads in order for full TCP session",
         ],
-        "on_hit": ["txt_decode"],
-        "on_miss": ["pcap_udp"],
+        "on_hit": ["txt_decode", "txt_base", "txt_rot", "xor_brute_file", "file_carve"],
+        "on_miss": ["pcap_udp", "pcap_tcp_flags", "pcap_stats", "pcap_strings"],
         "artifacts": ["pcap"],
     },
 
@@ -330,8 +340,8 @@ NODES = {
             "Wireshark → Analyze → Follow UDP Stream",
             "Unknown high port UDP → dump raw payload → run strings + decode_all",
         ],
-        "on_hit": ["pcap_dns", "txt_decode"],
-        "on_miss": ["pcap_tcp_flags"],
+        "on_hit": ["pcap_dns", "txt_decode", "txt_base", "file_carve", "hash_id", "zip_inspect"],
+        "on_miss": ["pcap_tcp_flags", "pcap_icmp", "pcap_stats", "pcap_strings"],
         "artifacts": ["pcap"],
     },
 
@@ -350,8 +360,8 @@ NODES = {
             "Follow the data channel TCP stream to get raw file bytes",
             "Wireshark → File → Export Objects → FTP-DATA saves all transfers at once",
         ],
-        "on_hit": ["file_carve", "zip_inspect"],
-        "on_miss": ["pcap_smtp"],
+        "on_hit": ["file_carve", "zip_inspect", "txt_decode", "img_carve", "pcap_creds_found", "pcap_stats"],
+        "on_miss": ["pcap_smtp", "pcap_http", "pcap_tls"],
         "artifacts": ["pcap"],
     },
 
@@ -370,8 +380,8 @@ NODES = {
             "Wireshark → File → Export Objects → IMF saves all messages",
             "POP3/IMAP also transmit emails — filter: pop || imap",
         ],
-        "on_hit": ["txt_decode", "file_carve"],
-        "on_miss": ["pcap_icmp"],
+        "on_hit": ["txt_decode", "file_carve", "txt_base", "img_carve", "zip_inspect"],
+        "on_miss": ["pcap_icmp", "pcap_stats", "pcap_ftp", "pcap_strings"],
         "artifacts": ["pcap"],
     },
 
@@ -390,8 +400,8 @@ NODES = {
             "Wireshark filter: arp.duplicate-address-detected",
             "Gratuitous ARP (unsolicited who-has = is-at): can be malicious",
         ],
-        "on_hit": ["pcap_http", "pcap_tls"],
-        "on_miss": ["pcap_tcp_flags"],
+        "on_hit": ["pcap_http", "pcap_tls", "pcap_stats", "pcap_creds_found", "web_recon"],
+        "on_miss": ["pcap_tcp_flags", "pcap_icmp", "pcap_udp"],
         "artifacts": ["pcap"],
     },
 
@@ -416,8 +426,8 @@ NODES = {
             "Sequence numbers can encode data — export and check for patterns",
             "Tools: covert_tcp, ncovert hide data in IP ID or TCP seq fields",
         ],
-        "on_hit": ["pcap_covert", "txt_decode"],
-        "on_miss": [],
+        "on_hit": ["pcap_covert", "txt_decode", "xor_brute_file", "file_carve", "pcap_stats"],
+        "on_miss": ["pcap_strings", "pcap_wireshark_filters", "pcap_extract"],
         "artifacts": ["pcap"],
     },
 
@@ -437,8 +447,8 @@ NODES = {
             "Timing: measure inter-packet gaps — unusual rhythms may encode bits",
             "Use: scapy, dpkt, or tshark -T ek (JSON) for programmatic analysis",
         ],
-        "on_hit": ["txt_decode"],
-        "on_miss": [],
+        "on_hit": ["txt_decode", "txt_base", "xor_brute_file", "pcap_dns", "pcap_http"],
+        "on_miss": ["pcap_strings", "pcap_stats", "pcap_tls"],
         "artifacts": ["pcap"],
     },
 
@@ -458,8 +468,8 @@ NODES = {
             "Check GPS coordinates — they might spell out a location/hint",
             "Software field may reveal the steg tool used",
         ],
-        "on_hit": [],
-        "on_miss": ["img_strings", "img_lsb"],
+        "on_hit": ["txt_decode", "img_strings", "web_recon"],
+        "on_miss": ["img_strings", "img_lsb", "img_entropy", "img_carve"],
         "artifacts": ["image"],
     },
 
@@ -476,8 +486,8 @@ NODES = {
             "Look for URLs, file paths, or commands embedded in the image",
             "Check both ASCII and UTF-16LE (-e both)",
         ],
-        "on_hit": [],
-        "on_miss": ["img_entropy"],
+        "on_hit": ["txt_decode", "txt_base", "img_carve", "zip_inspect"],
+        "on_miss": ["img_entropy", "img_lsb", "img_appended", "img_steg_tools"],
         "artifacts": ["image"],
     },
 
@@ -494,8 +504,8 @@ NODES = {
             "A single high-entropy block at the end → appended encrypted data",
             "Note the offset of suspicious regions for targeted carving",
         ],
-        "on_hit": ["xor_brute_file", "img_carve"],
-        "on_miss": ["img_lsb"],
+        "on_hit": ["xor_brute_file", "img_carve", "txt_decode", "file_carve", "zip_inspect"],
+        "on_miss": ["img_lsb", "img_appended", "img_steg_tools", "img_strings"],
         "artifacts": ["image"],
     },
 
@@ -521,8 +531,8 @@ NODES = {
             "If result is binary: run file_carver.py on lsb_out.bin",
             "If result looks encoded: run decode_all.py on it",
         ],
-        "on_hit": ["txt_decode", "file_carve"],
-        "on_miss": ["img_steg_tools"],
+        "on_hit": ["txt_decode", "file_carve", "xor_brute_file", "img_entropy", "img_carve"],
+        "on_miss": ["img_steg_tools", "img_appended", "img_strings"],
         "artifacts": ["image"],
     },
 
@@ -539,8 +549,8 @@ NODES = {
             "A PNG inside a PNG is common in CTF stego",
             "Check carved_000_ZIP.zip if one is found — unzip it",
         ],
-        "on_hit": ["zip_inspect", "txt_decode"],
-        "on_miss": ["img_appended"],
+        "on_hit": ["zip_inspect", "txt_decode", "img_meta", "elf_strings", "pdf_meta", "pcap_extract"],
+        "on_miss": ["img_appended", "img_steg_tools", "img_entropy", "img_strings"],
         "artifacts": ["image"],
     },
 
@@ -557,8 +567,8 @@ NODES = {
             "PNG: data after IEND chunk (4+4+4 = 12 bytes from IEND start)",
             "Even a few bytes can be a ROT/XOR key for other data",
         ],
-        "on_hit": ["txt_decode", "xor_brute_file"],
-        "on_miss": ["img_steg_tools"],
+        "on_hit": ["txt_decode", "xor_brute_file", "zip_inspect", "file_carve", "img_carve"],
+        "on_miss": ["img_steg_tools", "img_lsb", "img_entropy", "img_strings"],
         "artifacts": ["image"],
     },
 
@@ -576,14 +586,14 @@ NODES = {
             "If Software=GIMP in EXIF, likely not steghide",
             "stegcracker <image> /usr/share/wordlists/rockyou.txt for brute force",
         ],
-        "on_hit": ["txt_decode"],
-        "on_miss": [],
+        "on_hit": ["txt_decode", "img_carve", "zip_inspect", "file_carve"],
+        "on_miss": ["img_entropy", "img_lsb", "img_strings", "img_appended"],
         "artifacts": ["image"],
     },
 
     # ══════════ AUDIO ═════════════════════════════════════════════════════════
 
-    "aud_meta": {
+"aud_meta": {
         "title": "Extract Audio Metadata",
         "category": "stego",
         "description":
@@ -596,8 +606,8 @@ NODES = {
             "WAV RIFF INFO chunks: INAM, ICMT, ISFT, IART",
             "Cover art embedded in MP3 → extract and analyze as image",
         ],
-        "on_hit": [],
-        "on_miss": ["aud_lsb"],
+        "on_hit": ["txt_decode", "aud_strings", "img_carve"],
+        "on_miss": ["aud_lsb", "aud_spectrum", "aud_strings"],
         "artifacts": ["audio"],
     },
 
@@ -613,7 +623,7 @@ NODES = {
             {"flag": "--all",        "label": "All combos",    "default": True},
             {"flag": "--bit 0",      "label": "Bit 0 (LSB)",   "default": False},
             {"flag": "--bit 1",      "label": "Bit 1",         "default": False},
-            {"flag": "--channels 0", "label": "Left channel",  "default": False},
+            {"flag": "--channels 0", "label": "Left channel", "default": False},
             {"flag": "--channels 1", "label": "Right channel", "default": False},
         ],
         "tips": [
@@ -621,8 +631,8 @@ NODES = {
             "A 44100 Hz stereo WAV can hide ~11 KB per second at 1 bps",
             "If extracted looks encoded, run decode_all.py on it",
         ],
-        "on_hit": ["txt_decode", "file_carve"],
-        "on_miss": ["aud_spectrum"],
+        "on_hit": ["txt_decode", "file_carve", "xor_brute_file", "img_carve", "zip_inspect"],
+        "on_miss": ["aud_spectrum", "aud_strings", "aud_meta"],
         "artifacts": ["audio"],
     },
 
@@ -641,8 +651,8 @@ NODES = {
             "Use SonicVisualiser for higher resolution spectrograms",
             "Also try: sox <audio.wav> -n stat  — check for unusual sample values",
         ],
-        "on_hit": [],
-        "on_miss": ["aud_strings"],
+        "on_hit": ["txt_decode", "img_meta", "img_carve", "file_carve"],
+        "on_miss": ["aud_strings", "aud_lsb", "aud_meta"],
         "artifacts": ["audio"],
     },
 
@@ -658,8 +668,8 @@ NODES = {
             "Also check for appended data after audio EOF",
             "MP3 may have multiple ID3v2 tags — check each one",
         ],
-        "on_hit": [],
-        "on_miss": [],
+        "on_hit": ["txt_decode", "txt_base", "aud_meta"],
+        "on_miss": ["aud_lsb", "aud_spectrum", "file_carve"],
         "artifacts": ["audio"],
     },
 
@@ -679,8 +689,8 @@ NODES = {
             "If all files are 0 bytes but archive is large → data is in the comment or extra fields",
             "7z l -slt <archive.zip>  — shows all extra fields and comments",
         ],
-        "on_hit": ["zip_crack", "zip_contained"],
-        "on_miss": ["zip_crack", "zip_contained"],
+        "on_hit": ["zip_crack", "zip_contained", "file_carve", "img_carve", "pcap_extract", "txt_decode"],
+        "on_miss": ["zip_carve", "zip_contained", "file_carve"],
         "artifacts": ["zip"],
     },
 
@@ -756,8 +766,8 @@ NODES = {
             "Look for base64-looking strings → run base_decoder.py on them",
             "If nothing found: binary might be packed — check entropy next",
         ],
-        "on_hit": ["txt_decode"],
-        "on_miss": ["elf_entropy"],
+        "on_hit": ["txt_decode", "txt_base", "elf_sections", "elf_debug", "web_recon"],
+        "on_miss": ["elf_entropy", "elf_sections", "elf_debug", "hash_id"],
         "artifacts": ["elf"],
     },
 
@@ -994,8 +1004,8 @@ NODES = {
             "--search flag highlights any output containing ctf/osc/rocsc",
             "For files: python3 decode_all.py -f <file>",
         ],
-        "on_hit": [],
-        "on_miss": ["txt_base", "txt_xor"],
+        "on_hit": ["hash_id", "txt_xor", "file_carve", "web_recon"],
+        "on_miss": ["txt_base", "txt_xor", "txt_rot", "txt_freq"],
         "artifacts": ["text", "pcap", "image", "zip", "pdf", "unknown"],
     },
 
@@ -1312,8 +1322,8 @@ NODES = {
             "Look for process names, command-line arguments, file paths",
             "Browser process memory may contain session cookies in plaintext",
         ],
-        "on_hit": [],
-        "on_miss": ["mem_volatility"],
+        "on_hit": ["txt_decode", "txt_base", "mem_volatility", "hash_id", "mem_carve"],
+        "on_miss": ["mem_volatility", "mem_carve", "file_carve"],
         "artifacts": ["memory"],
     },
 
@@ -1469,6 +1479,635 @@ NODES = {
         "on_miss": [],
         "artifacts": [],
     },
+
+    # ══════════ PYTHON / SAGEMATH ═════════════════════════════════════════════
+
+    "py_read": {
+        "title": "Read & Analyse Python Source",
+        "category": "crypto",
+        "description":
+            "Open the script and scan for hardcoded keys/IVs, flag patterns, custom encode/decode "
+            "logic, imports of crypto libraries (Crypto, hashlib, gmpy2, sage), and suspicious constants.",
+        "tool": "strings_extractor.py + grep",
+        "command":
+            'python3 "{S}/strings_extractor.py" <script.py> --flags-only\n'
+            'grep -nE "(key|iv|flag|secret|password|encode|decode|base64|AES|RSA|XOR|cipher)" <script.py>',
+        "tips": [
+            "Look for hardcoded byte strings: b'\\xde\\xad...' or long hex literals",
+            "Check for suspicious large integer constants (RSA modulus N?)",
+            "from Crypto.Cipher import AES — check mode (ECB/CBC/CTR) and key source",
+            "Search for 'flag' variable assignments or open('flag.txt')",
+            "Check if the script reads input and transforms it — write the inverse",
+        ],
+        "on_hit": ["py_crypto_check", "py_sage_math", "txt_decode", "hash_id"],
+        "on_miss": ["py_deobfuscate", "py_run_script"],
+        "artifacts": ["python"],
+    },
+
+    "py_deobfuscate": {
+        "title": "Deobfuscate Python Code",
+        "category": "misc",
+        "description":
+            "Detect marshal/bytecode tricks, base64-encoded exec() payloads, or compile()-based "
+            "obfuscation layers. Unpack to reveal hidden logic.",
+        "tool": "grep / uncompyle6 / dis",
+        "command":
+            'grep -n "exec\\|compile\\|marshal\\|base64\\|__import__\\|eval\\|bytes" <script.py>\n'
+            '# Decode inner payload:\n'
+            'python3 -c "import base64; exec(base64.b64decode(PAYLOAD))"\n'
+            '# Decompile .pyc: python3 -m uncompyle6 <script.pyc>',
+        "tips": [
+            "exec(base64.b64decode(...)) is a classic one-layer obfuscation",
+            "marshal.loads hides bytecode — use dis.dis() to inspect opcodes",
+            "Try: import dis; dis.dis(compile(open('script.py').read(), 'x', 'exec'))",
+            "uncompyle6 or decompile3 can reverse compiled .pyc bytecode",
+            "Check for __doc__ strings storing encoded payloads",
+        ],
+        "on_hit": ["py_read", "py_crypto_check", "txt_decode"],
+        "on_miss": ["py_run_script", "py_crypto_check"],
+        "artifacts": ["python"],
+    },
+
+    "py_crypto_check": {
+        "title": "Identify Crypto & Math Operations",
+        "category": "crypto",
+        "description":
+            "Find cryptographic primitives: custom XOR, RSA (pow/mod), AES/DES usage, hash functions, "
+            "or Feistel-like structures. Identify the inverse operation to decrypt the flag.",
+        "tool": "grep / manual analysis",
+        "command":
+            'grep -nE "(pow|mod|xor|AES|RSA|SHA|MD5|hmac|Fernet|getPrime|inverse|gcd|lcm|sympy|gmpy2|sage|^\\s*\\^)" <script.py>',
+        "tips": [
+            "RSA: pow(m,e,n) encryption — find d via gmpy2.invert(e,(p-1)*(q-1))",
+            "XOR: ^ on bytes — brute-force single-byte key with xor_brute.py",
+            "AES-ECB: no IV, deterministic — try byte-at-a-time or block swap",
+            "AES-CBC: IV usually hardcoded or prepended to ciphertext",
+            "Custom Feistel: trace encrypt() and write the exact reverse",
+            "gmpy2.invert(e, phi) for RSA d; check for e=3 and small m",
+        ],
+        "on_hit": ["py_sage_math", "hash_id", "txt_decode", "txt_xor"],
+        "on_miss": ["py_deobfuscate", "py_run_script"],
+        "artifacts": ["python"],
+    },
+
+    "py_sage_math": {
+        "title": "SageMath / Number Theory Analysis",
+        "category": "crypto",
+        "description":
+            "Challenge uses SageMath or advanced number theory: lattice reduction (LLL), elliptic "
+            "curves, polynomial rings, discrete log. Identify the structure and apply the standard attack.",
+        "tool": "SageMath",
+        "command":
+            '# Install: sudo apt install sagemath\nsage <script.sage>\n'
+            '# Or run inline: python3 -c "from sage.all import *; ..."\n'
+            'grep -nE "(LLL|lattice|EllipticCurve|discrete_log|PolynomialRing|GF|Zmod|factor|small_roots|crt)" <script.py>',
+        "tips": [
+            "LLL lattice reduction → short vector attack (knapsack, biased-nonce ECDSA)",
+            "EllipticCurve(GF(p),[a,b]) → check MOV, SSMV, Pohlig-Hellman attacks",
+            "PolynomialRing + small_roots → Coppersmith partial key recovery",
+            "discrete_log in small group → Baby-step Giant-step or Pohlig-Hellman",
+            "factor(n) in Sage — try if n has special form or is < 512 bits",
+            "crt() for Chinese Remainder Theorem reconstruction",
+        ],
+        "on_hit": ["txt_decode", "hash_id"],
+        "on_miss": ["py_crypto_check", "py_run_script"],
+        "artifacts": ["python"],
+    },
+
+    "py_run_script": {
+        "title": "Run Script & Capture Output",
+        "category": "misc",
+        "description":
+            "Execute the script and capture all output. Look for embedded flags, encoded data, "
+            "or error messages that reveal the expected input format.",
+        "tool": "python3 / sage",
+        "command":
+            'python3 <script.py> 2>&1 | tee py_output.txt\n'
+            'grep -iE "(flag|ctf|osc|\\{|\\})" py_output.txt',
+        "tips": [
+            "Read the script thoroughly before running — safety first",
+            "If it waits for input: echo '' | python3 <script.py>",
+            "Pass a known test value to trace the encoding path",
+            "If it crashes, the traceback often reveals the algorithm structure",
+            "Check for time.sleep() — might be a timing or side-channel challenge",
+        ],
+        "on_hit": ["txt_decode", "txt_base", "txt_rot"],
+        "on_miss": ["py_deobfuscate", "py_crypto_check", "py_sage_math"],
+        "artifacts": ["python"],
+    },
+
+    # ══════════ JAVASCRIPT / TYPESCRIPT ══════════════════════════════════════════
+
+    "js_read": {
+        "title": "Read & Analyse JavaScript Source",
+        "category": "web",
+        "description":
+            "Read the JS/TS file and look for flag patterns, hardcoded secrets, API keys, "
+            "suspicious eval() calls, and encoded payloads.",
+        "tool": "cat / grep",
+        "command":
+            'cat <script.js>\n'
+            'grep -nE "(flag|CTF|secret|password|token|api.?key|eval|atob|fromCharCode|\\\\x[0-9a-f]{2})" <script.js>',
+        "tips": [
+            "Look for eval(atob('...')) — base64 encoded second payload",
+            "String.fromCharCode arrays contain character-code-encoded strings",
+            "Check variable names: _0xNNNN pattern = hex-array obfuscation",
+            "Source maps (.js.map) may contain original unminified code",
+            "Check HTML file for inline <script> blocks too",
+        ],
+        "on_hit": ["js_deobfuscate", "txt_decode", "txt_base", "web_jwt"],
+        "on_miss": ["js_node_run", "js_beautify"],
+        "artifacts": ["javascript"],
+    },
+
+    "js_deobfuscate": {
+        "title": "Deobfuscate JavaScript",
+        "category": "web",
+        "description":
+            "Detect and unwrap common JS obfuscation: eval/atob layers, fromCharCode arrays, "
+            "hex-escape strings, JSFuck, and _0xNNNN hex-array patterns.",
+        "tool": "js_deobfuscate.py",
+        "command": 'python3 "{S}/js_deobfuscate.py" <script.js> {ARGS}',
+        "args": [
+            {"flag": "--decode-strings", "label": "Decode base64 literals", "default": True},
+            {"flag": "--beautify",       "label": "Beautify output",         "default": True},
+        ],
+        "tips": [
+            "Copy decoded payload to browser console → F12 → Console → paste",
+            "JSFuck: use an online JSFuck decoder or node.js eval",
+            "Hex-array: obfuscator.io style — use js-beautify + manual analysis",
+            "If eval(func()), replace eval with console.log to see the inner code",
+        ],
+        "on_hit": ["js_node_run", "txt_decode", "txt_base"],
+        "on_miss": ["js_node_run"],
+        "artifacts": ["javascript"],
+    },
+
+    "js_node_run": {
+        "title": "Execute with Node.js",
+        "category": "web",
+        "description":
+            "Run the script in Node.js and capture stdout/stderr. Useful for encryption "
+            "challenges, flag generators, or CTF server emulation.",
+        "tool": "node",
+        "command":
+            'node <script.js> 2>&1 | tee js_output.txt\n'
+            'grep -iE "(flag|ctf|osc|\\{|\\})" js_output.txt',
+        "tips": [
+            "If it uses require('crypto'), node has it built-in",
+            "Add console.log() calls to trace variable values",
+            "If it expects stdin: echo 'test' | node <script.js>",
+            "For TypeScript: npx ts-node <file.ts>",
+            "Deno alternative: deno run --allow-all <script.ts>",
+        ],
+        "on_hit": ["txt_decode", "txt_base", "txt_rot"],
+        "on_miss": ["js_deobfuscate", "js_read"],
+        "artifacts": ["javascript"],
+    },
+
+    "js_beautify": {
+        "title": "Beautify & Format Minified JS",
+        "category": "web",
+        "description":
+            "Reformat minified or packed JavaScript to readable form. Adds indentation, "
+            "line breaks, and consistent spacing to reveal logic.",
+        "tool": "js-beautify / prettier",
+        "command":
+            'npx js-beautify -o <script.js>_pretty.js <script.js> 2>/dev/null || '
+            'python3 -c "import subprocess; subprocess.run([\'js-beautify\', \'<script.js>\'])" 2>/dev/null\n'
+            '# Alternative: prettier --write <script.js>',
+        "tips": [
+            "Install: npm install -g js-beautify",
+            "Online: beautifier.io or prettier.io/playground",
+            "After beautify, look for switch/case tables (obfuscator.io pattern)",
+            "Webpack bundles: look for __webpack_modules__ and module IDs",
+        ],
+        "on_hit": ["js_deobfuscate", "js_read"],
+        "on_miss": ["js_node_run"],
+        "artifacts": ["javascript"],
+    },
+
+    # ══════════ JAVA / JVM ═══════════════════════════════════════════════════════
+
+    "java_jar_inspect": {
+        "title": "Inspect JAR / Class File",
+        "category": "re",
+        "description":
+            "List contents of JAR, extract manifest, check main class, and look for "
+            "hardcoded strings, flag patterns, or interesting resource files.",
+        "tool": "jar / unzip",
+        "command":
+            'unzip -l <file.jar> | head -50\n'
+            'unzip -p <file.jar> META-INF/MANIFEST.MF\n'
+            'jar tf <file.jar> | grep -E "\\.(properties|txt|cfg|xml|json)"',
+        "tips": [
+            "MANIFEST.MF → Main-Class gives entry point",
+            "Look for .properties / config files with hardcoded creds",
+            "Extract: unzip <file.jar> -d jar_contents/",
+            "Resources in src/main/resources or META-INF/",
+            "Check for flag in .txt, README, or hidden files",
+        ],
+        "on_hit": ["java_decompile", "java_strings", "zip_inspect"],
+        "on_miss": ["java_decompile", "java_strings"],
+        "artifacts": ["java"],
+    },
+
+    "java_decompile": {
+        "title": "Decompile Java Bytecode",
+        "category": "re",
+        "description":
+            "Decompile .class files or entire JAR to readable Java source. "
+            "Inspect the logic, find crypto operations, and look for flag construction.",
+        "tool": "decompile_jar.py / cfr / procyon",
+        "command":
+            'python3 "{S}/decompile_jar.py" <file.jar>\n'
+            '# Or: java -jar cfr.jar <file.jar> --outputdir ./decompiled/\n'
+            '# Or: java -jar procyon-decompiler.jar -o ./decompiled/ <file.jar>',
+        "tips": [
+            "CFR: best for modern Java — download from github.com/leibnitz27/cfr",
+            "Procyon: good for Kotlin/Android",
+            "Fernflower: built into IntelliJ IDEA (open JAR directly)",
+            "After decompile: grep -r 'flag\\|CTF\\|password\\|secret' decompiled/",
+            "Check obfuscated names (a, b, c...) — follow data flow manually",
+        ],
+        "on_hit": ["java_strings", "txt_decode", "hash_id"],
+        "on_miss": ["java_strings"],
+        "artifacts": ["java"],
+    },
+
+    "java_strings": {
+        "title": "Extract Strings from Java Binary",
+        "category": "re",
+        "description":
+            "Pull all printable strings from the .jar or .class file. Fast way to find "
+            "flag patterns, URLs, passwords, and SQL queries without decompiling.",
+        "tool": "strings_extractor.py",
+        "command":
+            'python3 "{S}/strings_extractor.py" <file.jar> --flags-only\n'
+            'strings -n 8 <file.jar> | grep -iE "(flag|ctf|password|secret|sql|http)"',
+        "tips": [
+            "Class files store string constants in the constant pool — strings works well",
+            "Look for base64 strings that might be encoded flags or keys",
+            "SQL queries reveal database structure (web+java challenges)",
+            "URLs might point to additional challenge endpoints",
+        ],
+        "on_hit": ["txt_decode", "txt_base", "hash_id"],
+        "on_miss": ["java_decompile"],
+        "artifacts": ["java"],
+    },
+
+    # ══════════ SHELL / BATCH SCRIPTS ════════════════════════════════════════════
+
+    "sh_read": {
+        "title": "Read & Analyse Shell Script",
+        "category": "misc",
+        "description":
+            "Read shell/batch script for hardcoded flags, passwords, interesting commands, "
+            "encoded payloads (base64 eval tricks), or obfuscated logic.",
+        "tool": "cat / grep",
+        "command":
+            'cat <script.sh>\n'
+            'grep -nE "(flag|CTF|password|secret|eval|base64|curl|wget|nc |/dev/tcp)" <script.sh>',
+        "tips": [
+            "bash -x <script.sh> — execute with xtrace (shows each command)",
+            "Look for: echo 'payload' | base64 -d | bash (second stage)",
+            "PowerShell: -EncodedCommand flag → base64-encoded command",
+            "Batch: FOR /F tricks, CALL tricks, label-based obfuscation",
+            "Heredoc payloads (cat << EOF) may contain encoded data",
+        ],
+        "on_hit": ["sh_deobfuscate", "txt_base", "txt_decode"],
+        "on_miss": ["unk_strings"],
+        "artifacts": ["shell"],
+    },
+
+    "sh_deobfuscate": {
+        "title": "Deobfuscate Shell Script",
+        "category": "misc",
+        "description":
+            "Unwrap common shell obfuscation: base64 eval chains, variable substitution "
+            "tricks, PowerShell encoded commands, and char-code concatenation.",
+        "tool": "bash / manual",
+        "command":
+            '# Decode PowerShell -EncodedCommand:\n'
+            'echo "<base64>" | base64 -d | iconv -f UTF-16LE -t UTF-8\n'
+            '# Decode bash base64 eval:\n'
+            'echo "<payload>" | base64 -d\n'
+            '# Trace execution (safe read-only):\n'
+            'bash -n <script.sh>  # syntax check only, no execution',
+        "tips": [
+            "Never run unknown scripts directly — analyse first",
+            "Replace 'eval' with 'echo' to see decoded payload without running it",
+            "PS1: [System.Text.Encoding]::Unicode.GetString([Convert]::FromBase64String(...))",
+            "Multiple encoding layers: decode iteratively (base64 → gzip → base64...)",
+        ],
+        "on_hit": ["txt_base", "txt_decode", "sh_read"],
+        "on_miss": ["unk_strings"],
+        "artifacts": ["shell"],
+    },
+
+    # ══════════ CERTIFICATES / KEYS ══════════════════════════════════════════════
+
+    "cert_inspect": {
+        "title": "Inspect Certificate / Key File",
+        "category": "crypto",
+        "description":
+            "Parse PEM/DER certificate or key file. Extract subject, issuer, validity, "
+            "RSA/EC parameters, and check for weak key sizes.",
+        "tool": "cert_inspector.py / openssl",
+        "command": 'python3 "{S}/cert_inspector.py" <file.pem>',
+        "tips": [
+            "CN field may contain an encoded flag or hint",
+            "RSA ≤512 bits: factorisable with yafu/msieve or factordb.com",
+            "RSA ≤1024 bits: try factordb.com — many CTF keys are pre-factored",
+            "Self-signed certs with funny issuer names are often deliberate hints",
+            "openssl x509 -in cert.pem -noout -text | grep -A2 'Subject'",
+        ],
+        "on_hit": ["cert_rsa_attack", "hash_id", "txt_decode"],
+        "on_miss": ["cert_rsa_attack"],
+        "artifacts": ["cert"],
+    },
+
+    "cert_rsa_attack": {
+        "title": "RSA Key Attack",
+        "category": "crypto",
+        "description":
+            "Apply common RSA attacks: Fermat factorisation (p≈q), Wiener's theorem (small d), "
+            "small exponent direct root, and common-factor between multiple keys.",
+        "tool": "rsa_attack.py",
+        "command": 'python3 "{S}/rsa_attack.py" --pubkey <file.pem> --c <ciphertext_int>',
+        "tips": [
+            "Fermat: works when |p-q| is small — common in beginner CTFs",
+            "Wiener: e very large relative to n → d is small",
+            "e=3, small m: m = cube_root(c) directly (no modular reduction)",
+            "Multiple keys: check for shared prime with GCD(n1, n2)",
+            "factordb.com — paste n and check if already factored",
+            "Check e=65537, n < 512 bits: GNFS or online factor databases",
+        ],
+        "on_hit": ["txt_decode", "hash_id"],
+        "on_miss": ["py_sage_math"],
+        "artifacts": ["cert"],
+    },
+
+    # ══════════ SQLITE DATABASE ═══════════════════════════════════════════════════
+
+    "sql_schema": {
+        "title": "Dump Schema & Table List",
+        "category": "forensics",
+        "description":
+            "List all tables, views, and indexes in the SQLite database. "
+            "Read column names to identify interesting data before querying.",
+        "tool": "sql_inspector.py / sqlite3",
+        "command":
+            'python3 "{S}/sql_inspector.py" <database.db>\n'
+            '# Or interactive:\n'
+            'sqlite3 <database.db> ".schema"\n'
+            'sqlite3 <database.db> ".tables"',
+        "tips": [
+            "sqlite3 CLI: .mode column + .headers on for readable output",
+            "Check sqlite_master for unusual triggers or hidden tables",
+            "Look for tables named: flags, secrets, users, tokens, notes",
+            "Deleted rows may still be in WAL file (database.db-wal)",
+        ],
+        "on_hit": ["sql_search_flags", "sql_blobs"],
+        "on_miss": ["sql_search_flags"],
+        "artifacts": ["sqlite"],
+    },
+
+    "sql_search_flags": {
+        "title": "Search Database for Flag / Secrets",
+        "category": "forensics",
+        "description":
+            "Search all tables for flag patterns, encoded data, and suspicious values. "
+            "Also extracts BLOB columns as binary files for further analysis.",
+        "tool": "sql_inspector.py",
+        "command": 'python3 "{S}/sql_inspector.py" <database.db> {ARGS}',
+        "args": [
+            {"flag": "--blobs", "label": "Extract BLOB columns", "default": True},
+            {"flag": '--search "flag\\|ctf\\|secret"', "label": "Custom search", "default": False},
+        ],
+        "tips": [
+            "Try: SELECT * FROM users WHERE password LIKE '%flag%'",
+            "Hex blobs (X'...') might decode to file data — check with file command",
+            "JWT tokens in session columns → try jwt_none.py",
+            "Check 'deleted' or 'archive' tables — soft-deleted data",
+        ],
+        "on_hit": ["txt_decode", "txt_base", "hash_id", "file_carve"],
+        "on_miss": ["sql_blobs"],
+        "artifacts": ["sqlite"],
+    },
+
+    "sql_blobs": {
+        "title": "Extract & Analyse BLOB Columns",
+        "category": "forensics",
+        "description":
+            "Extract binary BLOB data stored in the database. BLOBs may be images, "
+            "archives, encrypted payloads, or other file types.",
+        "tool": "sql_inspector.py --blobs",
+        "command":
+            'python3 "{S}/sql_inspector.py" <database.db> --blobs\n'
+            '# Then check extracted files:\n'
+            'file <database>_blobs/*',
+        "tips": [
+            "BLOB columns named 'data', 'content', 'payload', 'image' are common",
+            "Extracted blobs → run file command → may be ZIP, PNG, ELF etc.",
+            "Base64-stored data: SELECT base64(data) FROM ... to decode",
+            "SQLCipher databases need the encryption key first",
+        ],
+        "on_hit": ["file_carve", "img_carve", "zip_inspect"],
+        "on_miss": ["sql_search_flags"],
+        "artifacts": ["sqlite"],
+    },
+
+    # ══════════ DEOBFUSCATORS ════════════════════════════════════════════════════
+
+    "ps_deobfuscate": {
+        "title": "Deobfuscate PowerShell",
+        "category": "re",
+        "description":
+            "Unwrap PowerShell obfuscation: -EncodedCommand base64, [char] arrays, "
+            "-join tricks, IEX/Invoke-Expression chains, XOR loops, and gzip payloads.",
+        "tool": "ps_deobfuscate.py",
+        "command": 'python3 "{S}/ps_deobfuscate.py" <file.ps1>',
+        "tips": [
+            "-EncodedCommand: base64 decoded as UTF-16LE",
+            "Replace eval/IEX with Write-Output to see decoded payload without running",
+            "PowerSploit / PoshC2 frameworks use heavy string obfuscation",
+            "Multiple layers: run repeatedly until output stabilises",
+            "Online: revshells.com / PowerDecode tool",
+        ],
+        "on_hit": ["txt_decode", "txt_base", "layer_decode"],
+        "on_miss": ["sh_deobfuscate"],
+        "artifacts": ["shell"],
+    },
+
+    "php_deobfuscate": {
+        "title": "Deobfuscate PHP",
+        "category": "web",
+        "description":
+            "Unwrap PHP obfuscation: base64_decode/str_rot13 chains, gzinflate layers, "
+            "chr() concatenation, hex/octal string literals, and eval() nesting.",
+        "tool": "php_deobfuscate.py",
+        "command": 'python3 "{S}/php_deobfuscate.py" <file.php>',
+        "tips": [
+            "Replace eval() with echo to see decoded payload without execution",
+            "Common pattern: eval(gzinflate(base64_decode('...')));",
+            "PHPObfuscator / Zend Guard: may need commercial deobfuscator",
+            "Check for preg_replace with /e modifier (execute flag, removed in PHP 7)",
+            "assert() used as eval() equivalent in older PHP",
+        ],
+        "on_hit": ["txt_decode", "txt_base", "layer_decode", "web_source"],
+        "on_miss": ["js_deobfuscate"],
+        "artifacts": ["web"],
+    },
+
+    "layer_decode": {
+        "title": "Multi-Layer Recursive Decoder",
+        "category": "misc",
+        "description":
+            "Automatically detect and strip encoding layers one by one. Handles base64, "
+            "base32, hex, URL, gzip, ROT13/47, reverse, HTML entities, unicode escapes, binary.",
+        "tool": "layer_decoder.py",
+        "command": 'python3 "{S}/layer_decoder.py" "<encoded_string>"',
+        "tips": [
+            "Also accepts a file: python3 layer_decoder.py <file.txt>",
+            "Stops when no more encodings are detected or a flag is found",
+            "For multiline blobs: cat file | python3 layer_decoder.py -",
+            "If stuck: try decode_all.py for a broader single-pass attempt",
+            "Common CTF pattern: base64 → gzip → base64 → ROT13 → flag",
+        ],
+        "on_hit": ["hash_id", "txt_xor"],
+        "on_miss": ["txt_decode", "txt_base", "number_decode"],
+        "artifacts": ["text", "unknown"],
+    },
+
+    # ══════════ AUTO DECODERS ════════════════════════════════════════════════════
+
+    "number_decode": {
+        "title": "Numeric / Symbolic Array Decoder",
+        "category": "misc",
+        "description":
+            "Decode arrays of numbers or symbols to text: ASCII decimal/octal arrays, "
+            "binary strings, phone keypad, NATO phonetic, Morse code, Braille, A1Z26.",
+        "tool": "number_decoder.py",
+        "command": 'python3 "{S}/number_decoder.py" "<numeric_input>"',
+        "tips": [
+            "ASCII decimal: 72 101 108 108 111 → Hello",
+            "A1Z26: 1=A, 26=Z, used in simple substitution ciphers",
+            "Morse: dots and dashes, try / or newline as word separator",
+            "Phone keypad: 222-444-555 → CIL (multi-tap)",
+            "Binary: 01001000 01100101 → He",
+        ],
+        "on_hit": ["txt_decode", "layer_decode", "hash_id"],
+        "on_miss": ["txt_base", "txt_decode"],
+        "artifacts": ["text", "unknown"],
+    },
+
+    # ══════════ RUST BINARY ═══════════════════════════════════════════════════════
+
+    "rust_analyse": {
+        "title": "Rust Binary Analysis",
+        "category": "re",
+        "description":
+            "Detect Rust binaries, demangle symbols, extract panic messages and source paths, "
+            "find interesting functions (check/verify/decrypt), and look for hardcoded secrets.",
+        "tool": "rust_demangler.py",
+        "command": 'python3 "{S}/rust_demangler.py" <binary> {ARGS}',
+        "args": [
+            {"flag": "--symbols", "label": "Show all symbols", "default": False},
+        ],
+        "tips": [
+            "Install rustfilt for better demangling: cargo install rustfilt",
+            "Panic messages reveal expected invariants — useful for input crafting",
+            "Source paths reveal crate/module structure even in stripped binaries",
+            "Rust binaries embed .rustc metadata section — check readelf -S",
+            "Use cutter/ghidra + rust_strings.py plugin for decompilation",
+            "ltrace -f ./binary — traces library calls including crypto",
+        ],
+        "on_hit": ["elf_ghidra", "xor_brute_file", "txt_decode"],
+        "on_miss": ["elf_strings", "elf_entropy"],
+        "artifacts": ["elf"],
+    },
+
+    "rust_symbolic": {
+        "title": "Rust Symbolic Execution / Angr",
+        "category": "re",
+        "description":
+            "Use angr or similar symbolic execution to automatically find inputs that "
+            "satisfy check/verify functions in Rust binaries.",
+        "tool": "angr (manual)",
+        "command":
+            '# Install: pip3 install angr\n'
+            '# Basic template:\n'
+            'python3 - << \'EOF\'\n'
+            'import angr, claripy\n'
+            'proj = angr.Project("<binary>", auto_load_libs=False)\n'
+            'flag_chars = [claripy.BVS(f"c{i}", 8) for i in range(40)]\n'
+            'flag = claripy.Concat(*flag_chars)\n'
+            'state = proj.factory.entry_state(stdin=flag)\n'
+            'sm = proj.factory.simulation_manager(state)\n'
+            'sm.explore(find=0xDEADBEEF, avoid=0xBADBAD)  # replace addresses\n'
+            'print(sm.found[0].posix.dumps(0))\n'
+            'EOF',
+        "tips": [
+            "Find 'good' and 'bad' addresses from Ghidra/Cutter first",
+            "Rust panic addresses are good 'avoid' targets",
+            "Use concolic execution for faster convergence on large inputs",
+            "radare2: afl~check → list functions, then set find/avoid",
+            "pwntools: p.process([binary]) + p.sendline(b'A'*40) for fuzzing",
+        ],
+        "on_hit": ["txt_decode"],
+        "on_miss": ["elf_ghidra", "elf_strings"],
+        "artifacts": ["elf"],
+    },
+
+    # ══════════ NODE.JS / NPM ════════════════════════════════════════════════════
+
+    "node_audit": {
+        "title": "Node.js Project Secrets Audit",
+        "category": "web",
+        "description":
+            "Scan JavaScript/TypeScript project for hardcoded secrets, API keys, JWTs, "
+            "dangerous eval/exec calls, prototype pollution, and suspicious npm scripts.",
+        "tool": "node_secrets_audit.py",
+        "command": 'python3 "{S}/node_secrets_audit.py" <directory> {ARGS}',
+        "args": [
+            {"flag": "--deep", "label": "Scan node_modules too", "default": False},
+        ],
+        "tips": [
+            "Check package.json 'scripts' — preinstall/postinstall can run arbitrary code",
+            "Look for .env files — often committed by mistake",
+            "Non-npmjs.org resolved URLs in package-lock.json = suspicious",
+            "Historical supply chain incidents: event-stream, node-ipc, colors",
+            "npm audit — checks for known CVEs in dependencies",
+        ],
+        "on_hit": ["web_jwt", "js_deobfuscate", "txt_decode"],
+        "on_miss": ["js_read", "js_deobfuscate"],
+        "artifacts": ["javascript"],
+    },
+
+    "node_env_inspect": {
+        "title": "Inspect Node.js Environment & Config",
+        "category": "web",
+        "description":
+            "Read .env, config files, and environment variable usage. Node apps often "
+            "load secrets from process.env or dotenv — find what values are expected.",
+        "tool": "grep / cat",
+        "command":
+            'cat .env 2>/dev/null\n'
+            'cat .env.local .env.development .env.production 2>/dev/null\n'
+            'grep -rn "process\\.env\\." <directory> --include="*.js" --include="*.ts" | head -30\n'
+            'grep -rn "require.*dotenv\\|import.*dotenv" <directory> | head -10',
+        "tips": [
+            ".env files often in repo root — check git history too",
+            "process.env.SECRET_KEY reveals what env var name to look for",
+            "Docker: docker inspect <container> --format '{{.Config.Env}}'",
+            "Check config/ directory: config.json, settings.js, secrets.yml",
+            "NODE_ENV=production vs development may switch between dummy and real secrets",
+        ],
+        "on_hit": ["web_jwt", "txt_decode", "hash_id"],
+        "on_miss": ["node_audit", "js_read"],
+        "artifacts": ["javascript"],
+    },
 }
 
 # ─── Which nodes start for each artifact type ─────────────────────────────────
@@ -1477,31 +2116,47 @@ INITIAL_NODES = {
     "image":   ["img_meta", "img_strings", "img_entropy", "img_lsb", "img_carve"],
     "audio":   ["aud_meta", "aud_lsb", "aud_spectrum"],
     "zip":     ["zip_inspect"],
-    "elf":     ["elf_strings", "elf_entropy"],
+    "elf":     ["elf_strings", "elf_entropy", "rust_analyse"],
     "exe":     ["exe_strings", "exe_entropy"],
     "pdf":     ["pdf_meta", "pdf_strings"],
-    "text":    ["txt_decode", "txt_base", "txt_rot"],
+    "text":    ["txt_decode", "txt_base", "txt_rot", "layer_decode", "number_decode"],
     "web":     ["web_recon", "web_source", "web_cookies"],
     "docker":  ["docker_inspect", "docker_env"],
     "memory":  ["mem_strings", "mem_volatility"],
-    "unknown": ["unk_file_type", "unk_strings"],
+    "unknown": ["unk_file_type", "unk_strings", "layer_decode"],
+    "python":     ["py_read", "py_deobfuscate", "py_crypto_check"],
+    "javascript": ["js_read", "js_deobfuscate", "js_node_run", "node_audit"],
+    "java":       ["java_jar_inspect", "java_strings"],
+    "shell":      ["sh_read", "ps_deobfuscate"],
+    "cert":       ["cert_inspect"],
+    "sqlite":     ["sql_schema", "sql_search_flags"],
+    "php":        ["php_deobfuscate", "js_read"],
+    "rust":       ["rust_analyse", "elf_strings"],
 }
 
 # ─── Investigation Engine ─────────────────────────────────────────────────────
 class Engine:
     def __init__(self):
-        self.artifacts  = []      # list of {type, subtype, name, notes}
+        self.artifacts  = []      # list of {type, subtype, name, path, notes, cues}
         self.active     = []      # node IDs currently shown
-        self.status     = {}      # node_id → "hit" | "miss" | "pending"
+        self.status     = {}      # node_id -> "hit" | "miss" | "pending"
         self.path       = []      # list of (node_id, result, timestamp)
-        self.notes      = {}      # node_id → str (user notes per card)
+        self.notes      = {}      # node_id -> str (user notes per card)
         self.scripts    = load_cfg()["scripts"]
 
     def save_note(self, node_id, text):
         self.notes[node_id] = text
 
-    def add_artifact(self, atype, subtype, name, notes):
-        self.artifacts.append({"type": atype, "subtype": subtype, "name": name, "notes": notes})
+    def add_artifact(self, atype, subtype, name, path, notes, cues=None):
+        artifact = {
+            "type": atype,
+            "subtype": subtype,
+            "name": name,
+            "path": path,
+            "notes": notes,
+            "cues": cues or []
+        }
+        self.artifacts.append(artifact)
         initial = INITIAL_NODES.get(atype, [])
         for nid in initial:
             if nid not in self.active and nid not in self.status:
@@ -1528,7 +2183,7 @@ class Engine:
         self.active.clear()
         self.status.clear()
         self.path.clear()
-
+        
     def get_command(self, node_id, selected_args=None):
         node = NODES.get(node_id, {})
         cmd = node.get("command", "")
@@ -1536,8 +2191,15 @@ class Engine:
         if "{ARGS}" in cmd:
             if selected_args is None:
                 selected_args = [a["flag"] for a in node.get("args", [])
-                                 if a.get("default", True)]
+                                  if a.get("default", True)]
             cmd = cmd.replace("{ARGS}", " ".join(selected_args)).strip()
+        # Replace file-like placeholders with the path of the first artifact
+        if self.artifacts:
+            first_artifact_path = self.artifacts[0]["path"]
+            import re
+            # Pattern to match placeholders like <file.pcap>, <archive.zip>, <image>, etc.
+            pattern = re.compile(r'<[^>]+>')
+            cmd = pattern.sub(first_artifact_path, cmd)
         return cmd
 
     def export(self):
@@ -1783,18 +2445,100 @@ class SuggestionCard(tk.Frame):
             self._run(first)
 
     def _run(self, cmd):
-        term = None
-        for t in ("x-terminal-emulator", "gnome-terminal", "xterm", "konsole"):
-            if subprocess.call(["which", t], stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL) == 0:
-                term = t
-                break
-        if term == "gnome-terminal":
-            subprocess.Popen([term, "--", "bash", "-c", f"{cmd}; exec bash"])
-        elif term:
-            subprocess.Popen([term, "-e", f"bash -c '{cmd}; exec bash'"])
-        else:
-            messagebox.showinfo("Run", f"No terminal found.\nCommand:\n{cmd}")
+        # Run command and capture output
+        try:
+            # Run the command and capture output
+            result = subprocess.run(
+                cmd, 
+                shell=True, 
+                capture_output=True, 
+                text=True, 
+                timeout=30  # 30 second timeout
+            )
+            
+            # Prepare output text
+            output_text = f"Command: {cmd}\n"
+            output_text += f"Return code: {result.returncode}\n"
+            output_text += f"STDOUT:\n{result.stdout}\n"
+            if result.stderr:
+                output_text += f"STDERR:\n{result.stderr}\n"
+            
+            # Show output in a dialog
+            self._show_output_dialog(output_text)
+            
+        except subprocess.TimeoutExpired:
+            messagebox.showwarning("Timeout", "Command execution timed out after 30 seconds.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to execute command:\n{str(e)}")
+
+    def _show_output_dialog(self, output_text):
+        """Show command output in a dialog with interesting/not interesting buttons"""
+        dialog = tk.Toplevel(self)
+        dialog.title("Command Output")
+        dialog.geometry("600x400")
+        dialog.configure(bg=BG_ROOT)
+        dialog.transient(self.winfo_toplevel())
+        dialog.grab_set()
+        
+        # Output text area
+        text_frame = tk.Frame(dialog, bg=BG_ROOT)
+        text_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        text_widget = tk.Text(text_frame, font=FONT_MONO, bg=BG_CODE, fg=FG_CODE,
+                              relief="solid", bd=1, wrap="word")
+        text_widget.pack(fill="both", expand=True, side="left")
+        
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=text_widget.yview)
+        scrollbar.pack(side="right", fill="y")
+        text_widget.configure(yscrollcommand=scrollbar.set)
+        
+        # Insert output text
+        text_widget.insert("1.0", output_text)
+        text_widget.configure(state="disabled")
+        
+        # Button frame
+        btn_frame = tk.Frame(dialog, bg=BG_ROOT)
+        btn_frame.pack(fill="x", padx=10, pady=(0, 10))
+        
+        # Interesting button
+        interesting_btn = tk.Button(btn_frame, text="Interesting!", font=FONT_BOLD,
+                                   bg=SUCCESS, fg="white", relief="flat",
+                                   padx=12, pady=5, cursor="hand2",
+                                   command=lambda: self._mark_output_interesting(dialog, output_text, True))
+        interesting_btn.pack(side="left", padx=(0, 8))
+        
+        # Not interesting button
+        not_interesting_btn = tk.Button(btn_frame, text="Not Interesting", font=FONT_MAIN,
+                                       bg="#9e9e9e", fg="white", relief="flat",
+                                       padx=12, pady=5, cursor="hand2",
+                                       command=lambda: self._mark_output_interesting(dialog, output_text, False))
+        not_interesting_btn.pack(side="left")
+        
+        # Close button
+        close_btn = tk.Button(btn_frame, text="Close", font=FONT_MAIN,
+                             bg="#2a2a4a", fg="white", relief="flat",
+                             padx=12, pady=5, cursor="hand2",
+                             command=dialog.destroy)
+        close_btn.pack(side="right")
+
+    def _mark_output_interesting(self, dialog, output_text, is_interesting):
+        """Mark command output as interesting or not interesting"""
+        # Add to engine notes for this node
+        current_notes = self.engine.notes.get(self.node_id, "")
+        status = "INTERESTING" if is_interesting else "NOT INTERESTING"
+        new_note = f"\n[{datetime.now().strftime('%H:%M:%S')}] Command output marked as {status}:\n{output_text[:200]}{'...' if len(output_text) > 200 else ''}"
+        self.engine.notes[self.node_id] = current_notes + new_note
+        
+        # Update the notes display if visible
+        if hasattr(self, 'notes_txt'):
+            self.notes_txt.configure(state="normal")
+            self.notes_txt.delete("1.0", "end")
+            self.notes_txt.insert("1.0", self.engine.notes.get(self.node_id, ""))
+            self.notes_txt.configure(state="disabled")
+        
+        dialog.destroy()
+        messagebox.showinfo("Marked", f"Output marked as {'interesting' if is_interesting else 'not interesting'}.")
 
     def _result(self, res):
         self._save_note()
@@ -1815,6 +2559,17 @@ class AddArtifactDialog(tk.Toplevel):
         ".txt": "text",  ".log": "text",  ".md": "text",
         ".exe": "exe",   ".dll": "exe",
         ".dmp": "memory",".raw": "memory",".vmem": "memory",".mem": "memory",
+        ".py": "python", ".pyw": "python", ".sage": "python", ".sagews": "python",
+        ".js": "javascript", ".ts": "javascript", ".jsx": "javascript",
+        ".tsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
+        ".jar": "java", ".class": "java", ".java": "java",
+        ".sh": "shell", ".bash": "shell", ".zsh": "shell",
+        ".ps1": "shell", ".bat": "shell", ".cmd": "shell",
+        ".pem": "cert", ".crt": "cert", ".cer": "cert",
+        ".key": "cert", ".p12": "cert", ".pfx": "cert", ".der": "cert",
+        ".db": "sqlite", ".sqlite": "sqlite", ".sqlite3": "sqlite",
+        ".php": "php", ".php7": "php", ".phtml": "php", ".php5": "php",
+        ".rs": "rust",
     }
 
     def __init__(self, parent, prefill=None):
@@ -1825,10 +2580,6 @@ class AddArtifactDialog(tk.Toplevel):
         self.result = None
         self._prefill = prefill or {}
         self._build()
-        # Register as DnD drop target (works because parent is TkinterDnD.Tk)
-        if HAS_DND:
-            self.drop_target_register(DND_FILES)
-            self.dnd_bind("<<Drop>>", self._on_drop)
         self.transient(parent)
         self.grab_set()
         self.lift()
@@ -1840,42 +2591,7 @@ class AddArtifactDialog(tk.Toplevel):
         tk.Label(self, text="Add Challenge Artifact", font=FONT_H1,
                  bg=BG_ROOT, fg=FG_MAIN).pack(padx=16, pady=(14, 4))
 
-        # Drag-drop hint strip
-        dnd_color = "#e8f0fe" if HAS_DND else "#f5f5f5"
-        dnd_txt   = "⬇  Drop a file here to auto-fill" if HAS_DND else "Browse or type a filename below"
-        self._drop_lbl = tk.Label(self, text=dnd_txt, font=FONT_SMALL,
-                                   bg=dnd_color, fg="#3a5bd9",
-                                   relief="flat", pady=6, cursor="hand2" if HAS_DND else "")
-        self._drop_lbl.pack(fill="x", padx=16, pady=(0, 6))
-
-        # ── Type ──────────────────────────────────────────────────────────────
-        tk.Label(self, text="Artifact type:", font=FONT_BOLD,
-                 bg=BG_ROOT, fg=FG_MAIN, anchor="w").pack(fill="x", **pad)
-        type_row = tk.Frame(self, bg=BG_ROOT)
-        type_row.pack(fill="x", padx=16, pady=(0, 4))
-
-        self.type_var = tk.StringVar(value=self._prefill.get("type", list(ARTIFACT_TYPES.keys())[0]))
-        self.type_cb = ttk.Combobox(type_row, textvariable=self.type_var,
-                                    values=list(ARTIFACT_TYPES.keys()),
-                                    state="readonly", width=14)
-        self.type_cb.pack(side="left")
-        self.type_lbl = tk.Label(type_row, text="", font=FONT_SMALL,
-                                 bg=BG_ROOT, fg=FG_SEC, wraplength=240, justify="left")
-        self.type_lbl.pack(side="left", padx=8)
-
-        # ── Subtype ────────────────────────────────────────────────────────────
-        tk.Label(self, text="Details / subtype:", font=FONT_BOLD,
-                 bg=BG_ROOT, fg=FG_MAIN, anchor="w").pack(fill="x", **pad)
-        self.sub_var = tk.StringVar()
-        self.sub_cb  = ttk.Combobox(self, textvariable=self.sub_var,
-                                    state="readonly", width=36)
-        self.sub_cb.pack(fill="x", padx=16, pady=(0, 4))
-
-        # NOW it's safe to fire type-change (sub_cb exists)
-        self.type_var.trace_add("write", self._on_type_change)
-        self._on_type_change()
-
-        # ── Name / path ────────────────────────────────────────────────────────
+        # ── Name / path ──
         tk.Label(self, text="Name / filename:", font=FONT_BOLD,
                  bg=BG_ROOT, fg=FG_MAIN, anchor="w").pack(fill="x", **pad)
         name_row = tk.Frame(self, bg=BG_ROOT)
@@ -1887,7 +2603,25 @@ class AddArtifactDialog(tk.Toplevel):
                   padx=8, pady=2, cursor="hand2",
                   command=self._browse).pack(side="left", padx=(6, 0))
 
-        # ── Notes ──────────────────────────────────────────────────────────────
+        # ── Artifact type ──
+        tk.Label(self, text="Artifact type:", font=FONT_BOLD,
+                 bg=BG_ROOT, fg=FG_MAIN, anchor="w").pack(fill="x", **pad)
+        self.type_var = tk.StringVar(value=self._prefill.get("type", "unknown"))
+        type_cb = ttk.Combobox(self, textvariable=self.type_var,
+                               values=list(ARTIFACT_TYPES.keys()), state="readonly", width=36)
+        type_cb.pack(fill="x", padx=16, pady=(0, 4))
+
+        # ── Details / subtype ── (must exist before trace fires)
+        tk.Label(self, text="Details / subtype:", font=FONT_BOLD,
+                 bg=BG_ROOT, fg=FG_MAIN, anchor="w").pack(fill="x", **pad)
+        self.sub_var = tk.StringVar()
+        self.sub_cb = ttk.Combobox(self, textvariable=self.sub_var,
+                                   state="readonly", width=36)
+        self.sub_cb.pack(fill="x", padx=16, pady=(0, 4))
+        self.type_var.trace_add("write", self._on_type_change)
+        self._on_type_change()  # populate subtypes now that sub_cb exists
+
+        # ── Notes ────────────…………………………………………………………
         tk.Label(self, text="Notes (what you know so far):", font=FONT_BOLD,
                  bg=BG_ROOT, fg=FG_MAIN, anchor="w").pack(fill="x", **pad)
         self.notes_txt = tk.Text(self, height=3, width=44, font=FONT_MAIN,
@@ -1896,7 +2630,16 @@ class AddArtifactDialog(tk.Toplevel):
         if self._prefill.get("notes"):
             self.notes_txt.insert("1.0", self._prefill["notes"])
 
-        # ── Buttons ────────────────────────────────────────────────────────────
+        # ── Cues (only for zip and pcap files) ────────────………………………………………………
+        self.cues_label = tk.Label(self, text="Investigation cues (comma-separated):", font=FONT_BOLD,
+                                   bg=BG_ROOT, fg=FG_MAIN, anchor="w")
+        self.cues_frame = tk.Frame(self, bg=BG_ROOT)
+        self._cues_var = tk.StringVar(value=self._prefill.get("cues", ""))
+        tk.Entry(self.cues_frame, textvariable=self._cues_var, width=40).pack(side="left", expand=True, fill="x")
+        tk.Label(self.cues_frame, text="e.g., http,dns,tcp,ssl", font=FONT_SMALL,
+                 bg=BG_ROOT, fg=FG_SEC).pack(side="left", padx=(6, 0))
+
+        # ── Buttons ────────────…………………………………………………………
         btn_row = tk.Frame(self, bg=BG_ROOT)
         btn_row.pack(fill="x", padx=16, pady=(0, 14))
         tk.Button(btn_row, text="Add Artifact", font=FONT_BOLD,
@@ -1910,7 +2653,9 @@ class AddArtifactDialog(tk.Toplevel):
 
     def _on_type_change(self, *_):
         t = self.type_var.get()
-        self.type_lbl.configure(text=ARTIFACT_TYPES.get(t, ""))
+        # Type label is kept for informational purposes
+        if hasattr(self, 'type_lbl'):
+            self.type_lbl.configure(text=ARTIFACT_TYPES.get(t, ""))
         subs = ARTIFACT_SUBTYPES.get(t, ["—"])
         self.sub_cb.configure(values=subs)
         cur = self._prefill.get("subtype")
@@ -1920,14 +2665,6 @@ class AddArtifactDialog(tk.Toplevel):
         path = filedialog.askopenfilename(title="Select artifact file")
         if path:
             self._apply_path(path)
-
-    def _on_drop(self, event):
-        raw = event.data.strip()
-        # tkinterdnd2 wraps paths with spaces in braces
-        paths = self.tk.splitlist(raw)
-        if paths:
-            self._apply_path(paths[0])
-        self._drop_lbl.configure(text="✓ File loaded — adjust type if needed", fg="#1b8a3e")
 
     def _apply_path(self, path):
         p = Path(path)
@@ -1945,14 +2682,29 @@ class AddArtifactDialog(tk.Toplevel):
                 pass
         if not atype:
             atype = "unknown"
-        self.type_var.set(atype)   # triggers _on_type_change
+        
+        # Set the type automatically (no user selection needed)
+        self.type_var.set(atype)
+        self._on_type_change()  # Update subtype combobox
+        
+        # Show/hide cues based on file type
+        if atype in ["zip", "pcap"]:
+            self.cues_label.pack(fill="x", padx=16, pady=(0, 4), after=self.notes_txt.master)
+            self.cues_frame.pack(fill="x", padx=16, pady=(0, 4), after=self.cues_label)
+        else:
+            self.cues_label.pack_forget()
+            self.cues_frame.pack_forget()
 
     def _confirm(self):
+        cues_text = getattr(self, '_cues_var', tk.StringVar(value="")).get().strip()
+        cues = [cue.strip() for cue in cues_text.split(",") if cue.strip()] if cues_text else []
+        
         self.result = {
             "type":    self.type_var.get(),
             "subtype": self.sub_var.get(),
             "name":    self.name_var.get().strip() or "(unnamed)",
             "notes":   self.notes_txt.get("1.0", "end").strip(),
+            "cues":    cues
         }
         self.destroy()
 
@@ -2066,17 +2818,12 @@ class CTFNavigator(_TkBase):
         self.art_frame = tk.Frame(left, bg=BG_ROOT)
         self.art_frame.pack(fill="x")
 
-        # Drop zone
-        dz_bg  = "#e8f0fe" if HAS_DND else BG_PANEL
-        dz_txt = "⬇  Drop file here" if HAS_DND else "Click + Add or drag files here"
-        self._drop_zone = tk.Label(left, text=dz_txt, font=FONT_SMALL,
-                                    bg=dz_bg, fg=ACCENT,
-                                    relief="flat", pady=5, cursor="hand2")
-        self._drop_zone.pack(fill="x", pady=(4, 0))
-        self._drop_zone.bind("<Button-1>", lambda e: self._add_artifact())
-        if HAS_DND:
-            self._drop_zone.drop_target_register(DND_FILES)
-            self._drop_zone.dnd_bind("<<Drop>>", self._on_drop)
+        # Drop zone / Add button
+        self._add_btn = tk.Button(left, text="+ Add Artifact", font=FONT_SMALL,
+                                   bg=ACCENT, fg="white",
+                                   relief="flat", pady=5, cursor="hand2",
+                                   command=self._add_artifact)
+        self._add_btn.pack(fill="x", pady=(4, 0))
 
         ttk.Separator(left, orient="horizontal").pack(fill="x", pady=8)
 
@@ -2136,10 +2883,53 @@ class CTFNavigator(_TkBase):
     # ── Actions ───────────────────────────────────────────────────────────────
 
     def _add_artifact(self):
-        dlg = AddArtifactDialog(self)
+        path = filedialog.askopenfilename(title="Select artifact file")
+        if not path:
+            return
+        p = Path(path)
+        ext = p.suffix.lower()
+        atype = AddArtifactDialog._EXT_MAP.get(ext)
+        if not atype:
+            try:
+                with open(path, "rb") as f:
+                    magic = f.read(4)
+                    if magic == b"\x7fELF":
+                        atype = "elf"
+                    elif magic[:2] == b"MZ":
+                        f.seek(0x3c)
+                        pe_offset = int.from_bytes(f.read(4), byteorder="little")
+                        f.seek(pe_offset)
+                        if f.read(4) == b"PE\x00\x00":
+                            atype = "exe"
+            except (OSError, ValueError):
+                pass
+        if not atype:
+            atype = "unknown"
+        subs = ARTIFACT_SUBTYPES.get(atype, ["—"])
+        subtype = subs[0] if subs else "—"
+        self.engine.add_artifact(atype, subtype, p.name, str(path), "")
+        self._refresh()
+
+    def _edit_artifact_details(self, index):
+        arts = self.engine.artifacts
+        if index < 0 or index >= len(arts):
+            return
+        a = arts[index]
+        prefill = {
+            "type":    a["type"],
+            "subtype": a["subtype"],
+            "name":    a["name"],
+            "notes":   a.get("notes", ""),
+            "cues":    ", ".join(a.get("cues", [])),
+        }
+        dlg = AddArtifactDialog(self, prefill)
         if dlg.result:
             r = dlg.result
-            self.engine.add_artifact(r["type"], r["subtype"], r["name"], r["notes"])
+            arts[index]["type"]    = r["type"]
+            arts[index]["subtype"] = r["subtype"]
+            arts[index]["name"]    = r["name"]
+            arts[index]["notes"]   = r["notes"]
+            arts[index]["cues"]    = r["cues"]
             self._refresh()
 
     def _open_settings(self):
@@ -2182,13 +2972,29 @@ class CTFNavigator(_TkBase):
             row = tk.Frame(self.art_frame, bg=BG_PANEL,
                            highlightbackground=BORDER, highlightthickness=1)
             row.pack(fill="x", pady=2)
+            
+            # Make row double-clickable to edit details
+            row.bind("<Double-Button-1>", lambda e, idx=i: self._edit_artifact_details(idx))
+            row.configure(cursor="hand2")
+            
             icon = {"pcap":"📡","image":"🖼","audio":"🎵","zip":"📦",
                     "elf":"⚙","exe":"💻","pdf":"📄","text":"🔤",
-                    "web":"🌐","docker":"🐳","memory":"🧠","unknown":"❓"}.get(a["type"],"📁")
+                    "web":"🌐","docker":"🐳","memory":"🧠","unknown":"❓",
+                    "python":"🐍","javascript":"🟨","java":"☕",
+                    "shell":"🐚","cert":"🔑","sqlite":"🗄",
+                    "php":"🐘","rust":"🦀"}.get(a["type"],"📁")
             tk.Label(row, text=f"{icon} {a['name']}", font=FONT_BOLD,
                      bg=BG_PANEL, fg=FG_MAIN).pack(side="left", padx=8, pady=4)
             tk.Label(row, text=a["subtype"], font=FONT_SMALL,
                      bg=BG_PANEL, fg=FG_SEC).pack(side="left")
+            
+            # Show cues if any
+            cues = a.get("cues", [])
+            if cues:
+                cues_text = f"[{', '.join(cues)}]"
+                tk.Label(row, text=cues_text, font=FONT_SMALL,
+                         bg=BG_PANEL, fg="#ff9800").pack(side="left", padx=(8, 0))
+                     
             tk.Button(row, text="✕", font=FONT_SMALL, bg=BG_PANEL, fg=FAIL_C,
                       relief="flat", cursor="hand2",
                       command=lambda idx=i: self._remove_artifact(idx)).pack(side="right", padx=4)
@@ -2199,32 +3005,6 @@ class CTFNavigator(_TkBase):
     def _remove_artifact(self, idx):
         self.engine.remove_artifact(idx)
         self._refresh()
-
-    def _on_drop(self, event):
-        paths = self.tk.splitlist(event.data.strip())
-        for raw in paths:
-            self._auto_add_file(raw.strip("{}"))
-        self._drop_zone.configure(text="⬇  Drop file here", fg=ACCENT)
-
-    def _auto_add_file(self, path):
-        p = Path(path)
-        ext = p.suffix.lower()
-        atype = AddArtifactDialog._EXT_MAP.get(ext)
-        if not atype:
-            try:
-                with open(path, "rb") as f:
-                    if f.read(4) == b"\x7fELF":
-                        atype = "elf"
-            except OSError:
-                pass
-        if not atype:
-            atype = "unknown"
-        subtype = ARTIFACT_SUBTYPES.get(atype, ["—"])[0]
-        self.engine.add_artifact(atype, subtype, p.name, f"Dropped: {path}")
-        self._refresh()
-        self._drop_zone.configure(
-            text=f"✓ Added {p.name} — drop another or click + Add",
-            fg=SUCCESS)
 
     def _toggle_filter(self, cat_id):
         if cat_id in self._cat_filter:
@@ -2275,10 +3055,15 @@ class CTFNavigator(_TkBase):
                 cat = NODES[nid].get("category", "misc")
                 if cat not in self._cat_filter:
                     continue
-            card = SuggestionCard(self.sug_inner, nid, self.engine,
-                                  on_change=self.on_change)
-            card.pack(fill="x", padx=4, pady=4)
-            self._cards[nid] = card
+            try:
+                card = SuggestionCard(self.sug_inner, nid, self.engine,
+                                      on_change=self.on_change)
+                card.pack(fill="x", padx=4, pady=4)
+                self._cards[nid] = card
+            except Exception as exc:
+                print(f"[CTFNav] card build failed for {nid!r}: {exc}", flush=True)
+
+        self.update_idletasks()
 
         pending_count = len(pending)
         total = len(self.engine.active)
